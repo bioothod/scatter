@@ -1,0 +1,6 @@
+scatter (0.0.1) unstable; urgency=low
+
+  * Initial commit
+
+ -- Evgeniy Polyakov <zbr@ioremap.net>  Sat, 19 Mar 2016 03:20:00 +0400
+
