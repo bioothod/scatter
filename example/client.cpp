@@ -8,7 +8,7 @@ using namespace ioremap;
 class simple_map {
 public:
 	simple_map(const std::string &s) {
-		m_node.reset(new scatter::node(create_addr(s)));
+		m_node.reset(new scatter::node(create_addr(s), std::bind(&simple_map::process, this, std::placeholders::_1)));
 	}
 	simple_map() {
 		m_node.reset(new scatter::node(std::bind(&simple_map::process, this, std::placeholders::_1)));

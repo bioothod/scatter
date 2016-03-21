@@ -22,6 +22,9 @@ enum {
 	__SCATTER_CMD_MAX
 };
 
+// this message is a reply
+#define SCATTER_FLAGS_REPLY	(1<<0)
+
 struct header {
 	uint64_t		id;
 	uint64_t		db;
@@ -125,9 +128,9 @@ public:
 typedef wangle::Pipeline<folly::IOBufQueue &, message> pipeline_t;
 typedef std::function<std::unique_ptr<message> (message &)> handler_fn_t;
 
-class server_handler : public wangle::HandlerAdapter<message> {
+class service : public wangle::Service<message, message> {
 public:
-	virtual void read(Context* ctx, message msg) {
+	virtual folly::Future<message> operator()(message msg) override {
 		LOG(INFO) << "received message" <<
 			": id: " << msg.hdr.id <<
 			", db: " << msg.hdr.db <<
@@ -136,27 +139,17 @@ public:
 			", size: " << msg.hdr.size <<
 			std::endl;
 
-		// forward client command upstairs
+		// process client commands
 		if (msg.hdr.cmd >= SCATTER_CMD_CLIENT) {
-			ctx->fireRead(std::move(msg));
-			return;
 		}
 
 		// process server commands
-	}
-
-	virtual void readException(Context* ctx, folly::exception_wrapper e) override {
-		folly::SocketAddress addr;
-		ctx->getTransport()->getPeerAddress(&addr);
-		LOG(WARNING) << "server: exception received from " << addr.describe() << ": " << folly::exceptionStr(e) << std::endl;
-		close(ctx);
-	}
-
-	virtual void readEOF(Context* ctx) override {
-		folly::SocketAddress addr;
-		ctx->getTransport()->getPeerAddress(&addr);
-		LOG(INFO) << "server: EOF received from " << addr.describe() << std::endl;
-		close(ctx);
+	
+		message reply(0);
+		reply.hdr = msg.hdr;
+		reply.size = 0;
+		reply.flags = SCATTER_FLAGS_REPLY;
+		return reply;
 	}
 
 	void transportActive(Context* ctx) override {
@@ -166,56 +159,9 @@ public:
 	}
 };
 
-class client_handler : public wangle::HandlerAdapter<message> {
+class pipeline_factory : public wangle::PipelineFactory<pipeline_t> {
 public:
-	client_handler(handler_fn_t &fn)
-		: wangle::HandlerAdapter<message>()
-		, m_fn(fn) {
-	}
-
-	virtual void read(Context* ctx, message msg) {
-		std::unique_ptr<message> reply = m_fn(msg);
-		if (reply) {
-			write(ctx, std::move(*reply));
-		}
-	}
-
-	virtual void readException(Context* ctx, folly::exception_wrapper e) override {
-		folly::SocketAddress addr;
-		ctx->getTransport()->getPeerAddress(&addr);
-		LOG(WARNING) << "client: exception received from " << addr.describe() << ": " << folly::exceptionStr(e) << std::endl;
-		close(ctx);
-	}
-
-	virtual void readEOF(Context* ctx) override {
-		folly::SocketAddress addr;
-		ctx->getTransport()->getPeerAddress(&addr);
-		LOG(INFO) << "client: EOF received from " << addr.describe() << std::endl;
-		close(ctx);
-	}
-
-private:
-	handler_fn_t m_fn;
-};
-
-
-class server_pipeline_factory : public wangle::PipelineFactory<pipeline_t> {
-public:
-	pipeline_t::Ptr newPipeline(std::shared_ptr<folly::AsyncTransportWrapper> socket) override {
-		auto pipeline = pipeline_t::create();
-		pipeline->addBack(wangle::AsyncSocketHandler(socket));
-		pipeline->addBack(message_codec());
-		pipeline->addBack(server_handler());
-		pipeline->finalize();
-		return pipeline;
-	}
-
-private:
-};
-
-class client_pipeline_factory : public wangle::PipelineFactory<pipeline_t> {
-public:
-	client_pipeline_factory(handler_fn_t fn)
+	pipeline_factory(handler_fn_t fn)
 		: wangle::PipelineFactory<pipeline_t>()
 		, m_handler(fn) {}
 
@@ -224,15 +170,67 @@ public:
 		pipeline->addBack(wangle::AsyncSocketHandler(socket));
 		pipeline->addBack(wangle::EventBaseHandler());
 		pipeline->addBack(message_codec());
-		pipeline->addBack(server_handler());
-		pipeline->addBack(client_handler(m_handler));
+		pipeline->addBack(wangle::MultiplexServerDispatcher<message, message>(&m_service));
 		pipeline->finalize();
 		return pipeline;
 	}
 
 private:
 	handler_fn_t m_handler;
+
+	wangle::ExecuterFilter<message, message> m_service {
+		std::make_shared<wangle::CPUThreadPoolExecutor>(10),
+		std::make_shared<service>()
+	};
 };
+
+class dispatcher_t : public wangle::ClientDispatcherBase<pipeline_t, message, message> {
+public:
+	void read(Context* ctx, message msg) override {
+		auto req = m_requests.find(msg.id);
+		if (req != m_requests.end()) {
+			auto p = std::move(req->second);
+			m_requests.erase(msg.id);
+			p.setValue(in);
+		}
+	}
+
+	Future<message> operator()(message msg) override {
+		auto& p = m_requests[msg.id];
+		auto f = p.getFuture();
+		p.setInterruptHandler(
+			[msg, this] (const folly::exception_wrapper &e) {
+				this->m_requests.erase(msg.id);
+			});
+
+		this->pipeline_->write(msg);
+		return f;
+	}
+
+	virtual Future<Unit> close() override {
+		printf("Channel closed\n");
+		return wangle::ClientDispatcherBase::close();
+	}
+
+	virtual Future<Unit> close(Context* ctx) override {
+		printf("Channel closed\n");
+		return wangle::ClientDispatcherBase::close(ctx);
+	}
+
+private:
+	std::unordered_map<uint64_t, folly::Promise<message>> m_requests;
+};
+
+template <typename Req, typename Resp = Req>
+class database_service {
+public:
+	database_service(std::shared_ptr<Service<Req, Resp>> service)
+	: m_service<Req, Resp>(service, std::chrono::seconds(5)) {}
+private:
+	wangle::ExpiringFilter<Req, Resp> m_service;
+};
+
+typedef std::shared_ptr<database_service<message, message>> shared_database_service_t;
 
 class db {
 public:
@@ -242,15 +240,23 @@ public:
 	, m_pipes(other.m_pipes) {
 	}
 
-	void connect(pipeline_t::Ptr pipe) {
-		std::lock_guard<std::mutex> m_guard(m_pipe_lock);
-		m_pipes.push_back(pipe);
+	void connect(pipeline_t *pipe) {
+		auto dispatcher = std::make_shared<dispatcher_t>();
+		dispatcher->setPipeline(pipe);
+
+		auto service = std::make_shared<shared_database_service_t>(dispatcher);
+
+		std::lock_guard<std::mutex> m_guard(m_client_lock);
+		m_clients.push_back(service);
+	}
+
+	folly::Future<message> send(message msg) {
 	}
 
 private:
 	uint64_t m_id;
-	std::mutex m_pipe_lock;
-	std::vector<pipeline_t::Ptr> m_pipes;
+	std::mutex m_client_lock;
+	std::vector<shared_database_service_t> m_clients;
 };
 
 class node {
@@ -259,14 +265,14 @@ public:
 		generate_id();
 		m_client.reset(new wangle::ClientBootstrap<pipeline_t>);
 		m_client->group(std::make_shared<wangle::IOThreadPoolExecutor>(1));
-		m_client->pipelineFactory(std::make_shared<client_pipeline_factory>(fn));
+		m_client->pipelineFactory(std::make_shared<pipeline_factory>(fn));
 	}
-	node(const folly::SocketAddress &addr) {
+	node(const folly::SocketAddress &addr, handler_fn_t fn) {
 		generate_id();
 		folly::SocketAddress tmp = addr;
 
 		m_server.reset(new wangle::ServerBootstrap<pipeline_t>);
-		m_server->childPipeline(std::make_shared<server_pipeline_factory>());
+		m_server->childPipeline(std::make_shared<pipeline_factory>(fn));
 		m_server->bind(tmp);
 	}
 	~node() {
@@ -324,6 +330,8 @@ private:
 
 	std::unique_ptr<wangle::ServerBootstrap<pipeline_t>> m_server;
 	std::unique_ptr<wangle::ClientBootstrap<pipeline_t>> m_client;
+	std::shared_ptr<dispatcher_t> m_dispatcher;
+
 	std::map<uint64_t, db> m_dbs;
 
 	void generate_id() {
