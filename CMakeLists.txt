@@ -15,29 +15,23 @@ string(REGEX MATCH "([0-9]+\\.[0-9]+$)" EBUCKET_VERSION_MINOR "${DEBFULLVERSION}
 include(cmake/locate_library.cmake)
 
 LOCATE_LIBRARY(MSGPACK "msgpack.hpp" "msgpack")
-LOCATE_LIBRARY(FOLLY "folly/futures/Future.h" "folly")
 LOCATE_LIBRARY(GLOG "glog/logging.h" "glog")
-LOCATE_LIBRARY(WANGLE "wangle/channel/AsyncSocketHandler.h" "wangle")
 
 find_package(Boost COMPONENTS system thread program_options REQUIRED)
 #find_package(Elliptics REQUIRED)
 
 include_directories(
 	"${CMAKE_CURRENT_SOURCE_DIR}/include"
-	${FOLLY_INCLUDE_DIRS}
 	${GLOG_INCLUDE_DIRS}
 	${MSGPACK_INCLUDE_DIRS}
-	${WANGLE_INCLUDE_DIRS}
 )
 
 link_directories(
-	${FOLLY_LIBRARY_DIRS}
 	${GLOG_LIBRARY_DIRS}
 	${MSGPACK_LIBRARY_DIRS}
-	${WANGLE_LIBRARY_DIRS}
 )
 
-#add_subdirectory(src)
+add_subdirectory(src)
 add_subdirectory(example)
 
 file(GLOB headers "${CMAKE_CURRENT_SOURCE_DIR}/include/scatter/*.hpp")

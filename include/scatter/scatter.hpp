@@ -1,17 +1,12 @@
 #pragma once
 
-#include <folly/Bits.h>
-#include <folly/io/IOBuf.h>
-#include <folly/io/IOBufQueue.h>
-#include <folly/SocketAddress.h>
+#define BOOST_THREAD_PROVIDES_FUTURE
+#define BOOST_THREAD_PROVIDES_FUTURE_CONTINUATION
+#include <boost/thread/future.hpp>
 
 
-#include <wangle/bootstrap/ClientBootstrap.h>
-#include <wangle/bootstrap/ServerBootstrap.h>
-#include <wangle/channel/AsyncSocketHandler.h>
-#include <wangle/channel/EventBaseHandler.h>
-#include <wangle/codec/MessageToByteEncoder.h>
-#include <wangle/codec/ByteToMessageDecoder.h>
+#include <boost/bind.hpp> // must be first
+#include <boost/asio.hpp>
 
 namespace ioremap { namespace scatter {
 
@@ -73,6 +68,66 @@ struct message {
 	}
 };
 
+class tcp_connection : public std::enable_shared_from_this<tcp_connection>
+{
+public:
+	typedef std::shared_ptr<tcp_connection> pointer;
+
+	static pointer create(boost::asio::io_service& io_service) {
+		return pointer(new tcp_connection(io_service));
+	}
+
+	tcp::socket& socket() {
+		return m_socket;
+	}
+
+	void start() {
+		m_message = make_daytime_string();
+
+		boost::asio::async_write(socket_, boost::asio::buffer(m_message),
+				std::bind(&tcp_connection::handle_write, shared_from_this(),
+					boost::asio::placeholders::error,
+					boost::asio::placeholders::bytes_transferred));
+	}
+
+private:
+	tcp::socket m_socket;
+	std::string m_message;
+
+	tcp_connection(boost::asio::io_service& io_service) : socket_(io_service) {}
+
+	void handle_write(const boost::system::error_code &error, size_t bytes_transferred) {
+		(void)error;
+		(void)bytes_transferred;
+	}
+};
+
+class server {
+public:
+	server(boost::asio::io_service& io_service) : m_acceptor(io_service, tcp::endpoint(tcp::v4(), 13)) {
+		start_accept();
+	}
+
+private:
+	boost::asio::ip::tcp::acceptor m_acceptor;
+
+	void start_accept() {
+		tcp_connection::pointer new_connection = tcp_connection::create(m_acceptor.get_io_service());
+
+		m_acceptor.async_accept(new_connection->socket(),
+				std::bind(&tcp_server::handle_accept, this, new_connection,
+					boost::asio::placeholders::error));
+	}
+
+	void handle_accept(tcp_connection::pointer new_connection, const boost::system::error_code& error) {
+		if (!error) {
+			new_connection->start();
+		}
+
+		start_accept();
+	}
+};
+
 class message_codec: public wangle::Handler<folly::IOBufQueue &, message, message, std::unique_ptr<folly::IOBuf>> {
 public:
 	typedef typename wangle::Handler<folly::IOBufQueue &, message, message, std::unique_ptr<folly::IOBuf>>::Context Context;
@@ -125,113 +180,6 @@ public:
 	}
 };
 
-typedef wangle::Pipeline<folly::IOBufQueue &, message> pipeline_t;
-typedef std::function<std::unique_ptr<message> (message &)> handler_fn_t;
-
-class service : public wangle::Service<message, message> {
-public:
-	virtual folly::Future<message> operator()(message msg) override {
-		LOG(INFO) << "received message" <<
-			": id: " << msg.hdr.id <<
-			", db: " << msg.hdr.db <<
-			", cmd: " << msg.hdr.cmd <<
-			", flags: " << msg.hdr.flags <<
-			", size: " << msg.hdr.size <<
-			std::endl;
-
-		// process client commands
-		if (msg.hdr.cmd >= SCATTER_CMD_CLIENT) {
-		}
-
-		// process server commands
-	
-		message reply(0);
-		reply.hdr = msg.hdr;
-		reply.size = 0;
-		reply.flags = SCATTER_FLAGS_REPLY;
-		return reply;
-	}
-
-	void transportActive(Context* ctx) override {
-		folly::SocketAddress addr;
-		ctx->getTransport()->getPeerAddress(&addr);
-		LOG(INFO) << "connected peer " << addr.describe() << std::endl;
-	}
-};
-
-class pipeline_factory : public wangle::PipelineFactory<pipeline_t> {
-public:
-	pipeline_factory(handler_fn_t fn)
-		: wangle::PipelineFactory<pipeline_t>()
-		, m_handler(fn) {}
-
-	pipeline_t::Ptr newPipeline(std::shared_ptr<folly::AsyncTransportWrapper> socket) override {
-		auto pipeline = pipeline_t::create();
-		pipeline->addBack(wangle::AsyncSocketHandler(socket));
-		pipeline->addBack(wangle::EventBaseHandler());
-		pipeline->addBack(message_codec());
-		pipeline->addBack(wangle::MultiplexServerDispatcher<message, message>(&m_service));
-		pipeline->finalize();
-		return pipeline;
-	}
-
-private:
-	handler_fn_t m_handler;
-
-	wangle::ExecuterFilter<message, message> m_service {
-		std::make_shared<wangle::CPUThreadPoolExecutor>(10),
-		std::make_shared<service>()
-	};
-};
-
-class dispatcher_t : public wangle::ClientDispatcherBase<pipeline_t, message, message> {
-public:
-	void read(Context* ctx, message msg) override {
-		auto req = m_requests.find(msg.id);
-		if (req != m_requests.end()) {
-			auto p = std::move(req->second);
-			m_requests.erase(msg.id);
-			p.setValue(in);
-		}
-	}
-
-	Future<message> operator()(message msg) override {
-		auto& p = m_requests[msg.id];
-		auto f = p.getFuture();
-		p.setInterruptHandler(
-			[msg, this] (const folly::exception_wrapper &e) {
-				this->m_requests.erase(msg.id);
-			});
-
-		this->pipeline_->write(msg);
-		return f;
-	}
-
-	virtual Future<Unit> close() override {
-		printf("Channel closed\n");
-		return wangle::ClientDispatcherBase::close();
-	}
-
-	virtual Future<Unit> close(Context* ctx) override {
-		printf("Channel closed\n");
-		return wangle::ClientDispatcherBase::close(ctx);
-	}
-
-private:
-	std::unordered_map<uint64_t, folly::Promise<message>> m_requests;
-};
-
-template <typename Req, typename Resp = Req>
-class database_service {
-public:
-	database_service(std::shared_ptr<Service<Req, Resp>> service)
-	: m_service<Req, Resp>(service, std::chrono::seconds(5)) {}
-private:
-	wangle::ExpiringFilter<Req, Resp> m_service;
-};
-
-typedef std::shared_ptr<database_service<message, message>> shared_database_service_t;
-
 class db {
 public:
 	db(uint64_t id) : m_id(id) {}
@@ -262,22 +210,14 @@ private:
 class node {
 public:
 	node(handler_fn_t fn) {
-		generate_id();
-		m_client.reset(new wangle::ClientBootstrap<pipeline_t>);
-		m_client->group(std::make_shared<wangle::IOThreadPoolExecutor>(1));
-		m_client->pipelineFactory(std::make_shared<pipeline_factory>(fn));
+		init(1);
 	}
-	node(const folly::SocketAddress &addr, handler_fn_t fn) {
-		generate_id();
-		folly::SocketAddress tmp = addr;
+	node(const std::string &addr_str, handler_fn_t fn) {
+		init(5);
 
-		m_server.reset(new wangle::ServerBootstrap<pipeline_t>);
-		m_server->childPipeline(std::make_shared<pipeline_factory>(fn));
-		m_server->bind(tmp);
+
 	}
 	~node() {
-		if (m_server)
-			m_server->stop();
 	}
 
 	void connect(const folly::SocketAddress &addr, uint64_t db_id) {
@@ -328,14 +268,16 @@ public:
 private:
 	uint64_t m_id;
 
-	std::unique_ptr<wangle::ServerBootstrap<pipeline_t>> m_server;
-	std::unique_ptr<wangle::ClientBootstrap<pipeline_t>> m_client;
-	std::shared_ptr<dispatcher_t> m_dispatcher;
+	std::unique_ptr<io_service_pool> m_io_pool;
+	std::unique_ptr<boost::asio::ip::tcp::resolver> m_resolver;
 
 	std::map<uint64_t, db> m_dbs;
 
-	void generate_id() {
+	void init(int io_pool_size) {
 		m_id = rand();
+
+		m_io_pool.reset(new io_service_pool(io_pool_size));
+		m_resolver.reset(new boost::asio::ip::tcp::resolver(m_io_pool->get_service()));
 	}
 };
 

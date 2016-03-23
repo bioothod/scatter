@@ -1,4 +1,4 @@
-add_library(scatter scatter.cpp)
+add_library(scatter exception.cpp)
 target_link_libraries(scatter
 	${FOLLY_LIBRARIES}
 	${WANGLE_LIBRARIES}
