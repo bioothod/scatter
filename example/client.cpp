@@ -1,11 +1,31 @@
-#include "scatter/pool.hpp"
-#include "scatter/resolver.hpp"
+#include "scatter/scatter.hpp"
 
+#include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
 
 #include <iostream>
 
 using namespace ioremap;
+
+class simple_map {
+public:
+	simple_map(const std::string &s) {
+		m_node.reset(new scatter::node(s, std::bind(&simple_map::process, this, std::placeholders::_1)));
+	}
+	simple_map() {
+		m_node.reset(new scatter::node(std::bind(&simple_map::process, this, std::placeholders::_1)));
+	}
+
+	void connect(const std::string &s, uint64_t db_id) {
+		m_node->connect(s, db_id);
+	}
+
+private:
+	std::unique_ptr<scatter::node> m_node;
+
+	void process(scatter::message &msg) {
+	}
+};
 
 int main(int argc, char *argv[])
 {
@@ -16,11 +36,15 @@ int main(int argc, char *argv[])
 		("help", "this help message")
 		;
 
+	std::string server_addr;
 	std::vector<std::string> remotes;
+	uint64_t db;
 
 	bpo::options_description snet("Scatter network options");
 	snet.add_options()
 		("remote", bpo::value<std::vector<std::string>>(&remotes)->composing(), "remote node: addr:port:family")
+		("listen", bpo::value<std::string>(&server_addr), "listen address: addr:port:family")
+		("db", bpo::value<uint64_t>(&db)->required(), "numberic database id to use")
 		;
 
 	bpo::options_description cmdline_options;
@@ -42,24 +66,27 @@ int main(int argc, char *argv[])
 		return -1;
 	}
 
-	scatter::io_service_pool io(3);
-	scatter::resolver<> res(io);
 
-	std::vector<std::future<boost::asio::ip::tcp::resolver::iterator>> afs;
-	for (const auto &addr : remotes) {
-		afs.emplace_back(std::move(res.resolve(addr)));
+	if (server_addr.empty() && remotes.empty()) {
+		std::cerr << "You must specify either address to listen or set of remote addresses to connect\n" <<
+			cmdline_options << std::endl;
+		return -1;
 	}
 
-	int pos = 0;
-	for (auto &f: afs) {
-		try {
-			auto endpoint = f.get()->endpoint();
-			auto addr = endpoint.address();
-			auto port = endpoint.port();
-			std::cout << remotes[pos] << " : " << addr.to_string() << ":" << port << std::endl;
-		} catch (const std::exception &e) {
-			std::cout << remotes[pos] << " : " << "could not resolve address: " << e.what() << std::endl;
-		}
-		pos++;
+	srand(time(NULL));
+
+	std::unique_ptr<simple_map> n;
+	if (!server_addr.empty()) {
+		n.reset(new simple_map(server_addr));
+	} else {
+		n.reset(new simple_map());
+	}
+
+	for (const auto &addr : remotes) {
+		n->connect(addr, db);
+	}
+
+	while (true) {
+		sleep(1);
 	}
 }

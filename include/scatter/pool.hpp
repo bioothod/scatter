@@ -17,8 +17,6 @@
 
 namespace ioremap { namespace scatter {
 
-using handler_fn_t = std::function<void ()>;
-
 class io_service_pool {
 public:
 	io_service_pool(int num) : m_work(new boost::asio::io_service::work(m_io_service)) {
@@ -39,7 +37,7 @@ public:
 		return m_io_service;
 	}
 
-	void queue_task(handler_fn_t fn) {
+	void queue_task(std::function<void ()> fn) {
 		m_io_service.post(fn);
 	}
 

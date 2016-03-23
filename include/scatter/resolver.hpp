@@ -61,7 +61,7 @@ public:
 			std::promise<IterType> p;
 			std::future<IterType> f = p.get_future();
 
-			auto endpoint = boost::asio::ip::tcp::endpoint(addr, atoi(port_str.c_str()));
+			auto endpoint = typename ProtoType::endpoint(addr, atoi(port_str.c_str()));
 			p.set_value(IterType::create(endpoint, addr_str, port_str));
 			return f;
 		}

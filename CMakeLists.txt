@@ -12,6 +12,7 @@ string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" DEBFULLVERSION "${DEBCHANGELOG}"
 string(REGEX MATCH "([0-9]+)" EBUCKET_VERSION_MAJOR "${DEBFULLVERSION}")
 string(REGEX MATCH "([0-9]+\\.[0-9]+$)" EBUCKET_VERSION_MINOR "${DEBFULLVERSION}")
 
+include(TestBigEndian)
 include(cmake/locate_library.cmake)
 
 LOCATE_LIBRARY(MSGPACK "msgpack.hpp" "msgpack")
@@ -19,6 +20,18 @@ LOCATE_LIBRARY(GLOG "glog/logging.h" "glog")
 
 find_package(Boost COMPONENTS system thread program_options REQUIRED)
 #find_package(Elliptics REQUIRED)
+
+# Test endianness
+test_big_endian(HAVE_BIG_ENDIAN)
+if(HAVE_BIG_ENDIAN)
+    add_definitions(-DBYTEORDER=4321)
+    add_definitions(-DWORDS_BIGENDIAN=1)
+else()
+    add_definitions(-DBYTEORDER=1234)
+endif()
+
+set(CMAKE_EXE_LINKER_FLAGS -pthread)
+find_package(Threads REQUIRED)
 
 include_directories(
 	"${CMAKE_CURRENT_SOURCE_DIR}/include"
