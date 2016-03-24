@@ -11,6 +11,7 @@
 
 #include <glog/logging.h>
 
+#include <deque>
 #include <set>
 
 namespace ioremap { namespace scatter {
@@ -23,7 +24,10 @@ enum {
 };
 
 // this message is a reply
-#define SCATTER_FLAGS_REPLY	(1<<0)
+#define SCATTER_FLAGS_REPLY		(1<<0)
+
+// send acknowledge to given request
+#define SCATTER_FLAGS_NEED_ACK		(1<<1)
 
 struct header {
 	uint64_t		id;
@@ -45,6 +49,42 @@ struct header {
 		flags = scatter_bswap64(flags);
 		size = scatter_bswap64(size);
 	}
+
+	std::string cmd_string() const {
+		if (cmd >= 0 && cmd < __SCATTER_CMD_MAX) {
+			static std::map<int, std::string> command_strings = {
+				{ SCATTER_CMD_SERVER, "server" },
+				{ SCATTER_CMD_JOIN, "join" },
+				{ SCATTER_CMD_CLIENT, "client" },
+			};
+
+			return command_strings[cmd];
+		}
+
+		return "unsupported";
+	}
+
+	std::string flags_string() const {
+		static struct flag_info {
+			uint64_t flag;
+			const char *name;
+		} infos[] = {
+			{ SCATTER_FLAGS_REPLY, "reply" },
+			{ SCATTER_FLAGS_NEED_ACK, "need_ack" },
+		};
+
+		std::ostringstream ss;
+		ss << "[";
+		std::string prefix = "";
+		for (size_t i = 0; i < sizeof(infos) / sizeof(infos[0]); ++i) {
+			if (flags & infos[i].flag) {
+				ss << prefix << infos[i].name;
+				prefix = "|";
+			}
+		}
+		ss << "]";
+		return ss.str();
+	}
 };
 
 class message {
@@ -56,14 +96,16 @@ public:
 	};
 
 	message() : message(0) {
-		LOG(INFO) << "this: " << this << ", created empty message buffer";
 	}
 
 	message(size_t size) {
 		m_buffer = std::make_shared<std::vector<char>>(size + sizeof(header));
-		LOG(INFO) << "this: " << this << ", created message buffer with size: " << size;
 		advance(sizeof(header));
 	}
+
+	message(std::shared_ptr<std::vector<char>> raw_buffer) : m_buffer(raw_buffer) {
+	}
+
 
 	bool decode_header() {
 		hdr = *reinterpret_cast<header *>(buffer());
@@ -94,6 +136,9 @@ public:
 		return const_cast<char *>(m_buffer->data() + m_data_offset);
 	}
 
+	std::shared_ptr<std::vector<char>> raw_buffer() {
+		return m_buffer;
+	}
 
 	size_t total_size() const {
 		return m_buffer->size();
@@ -112,8 +157,19 @@ public:
 		m_data_offset += size;
 	}
 
+	std::string to_string() const {
+		std::ostringstream ss;
+		ss <<	": id: " << hdr.id <<
+			", db: " << hdr.db <<
+			", cmd: " << hdr.cmd << " " << hdr.cmd_string() <<
+			", flags: 0x" << std::hex << hdr.flags << std::dec << " " << hdr.flags_string() <<
+			", size: " << hdr.size;
+
+		return ss.str();
+	}
+
 private:
-	// this buffer has enough size to host header and data
+	// this buffer has to have enough size to host header and data
 	std::shared_ptr<std::vector<char>> m_buffer;
 
 	bool m_cpu = true;
@@ -135,11 +191,13 @@ public:
 	typedef boost::asio::ip::tcp proto;
 	typedef typename proto::resolver::iterator resolver_iterator;
 
-	static pointer create(io_service_pool& io_pool, typename proto::socket &&socket) {
-		return pointer(new connection(io_pool, std::move(socket)));
+	typedef std::function<void (pointer client, message &)> handler_fn_t;
+
+	static pointer create(io_service_pool& io_pool, handler_fn_t fn, typename proto::socket &&socket) {
+		return pointer(new connection(io_pool, fn, std::move(socket)));
 	}
-	static pointer create(io_service_pool& io_pool) {
-		return pointer(new connection(io_pool));
+	static pointer create(io_service_pool& io_pool, handler_fn_t fn) {
+		return pointer(new connection(io_pool, fn));
 	}
 
 	proto::socket& socket() {
@@ -154,8 +212,8 @@ public:
 		read_header();
 	}
 
-	std::future<resolver_iterator> connect(const resolver_iterator it) {
-		return boost::asio::async_connect(m_socket, it, boost::asio::use_future);
+	void connect(const resolver_iterator it) {
+		return boost::asio::async_connect(m_socket, it, std::bind(&connection::read_header, shared_from_this()));
 	}
 
 	std::future<std::size_t> send(const message &msg) {
@@ -164,17 +222,36 @@ public:
 				boost::asio::use_future);
 	}
 
+	void send_reply(message &msg) {
+		auto self(shared_from_this());
+		std::shared_ptr<message> reply = std::make_shared<message>();
+		reply->hdr = msg.hdr;
+		reply->hdr.size = 0;
+		reply->hdr.flags &= ~SCATTER_FLAGS_NEED_ACK;
+		reply->hdr.flags |= SCATTER_FLAGS_REPLY;
+		reply->encode_header();
+
+		return boost::asio::async_write(m_socket,
+				boost::asio::buffer(reply->buffer(), reply->total_size()),
+				[this, self, reply] (boost::system::error_code /*ec*/, std::size_t /*size*/) {
+				});
+	}
+
+
 private:
 	io_service_pool &m_pool;
+	handler_fn_t m_fn;
 	proto::socket m_socket;
 	message m_message;
 
-	connection(io_service_pool &io, typename proto::socket &&socket)
-		: m_pool(io)
-		, m_socket(std::move(socket)) {}
-	connection(io_service_pool &io)
-		: m_pool(io)
-		, m_socket(m_pool.get_service()) {}
+	connection(io_service_pool &io, handler_fn_t fn, typename proto::socket &&socket)
+		: m_pool(io),
+		  m_fn(fn),
+		  m_socket(std::move(socket)) {}
+	connection(io_service_pool &io, handler_fn_t fn)
+		: m_pool(io),
+		  m_fn(fn),
+		  m_socket(m_pool.get_service()) {}
 
 	void handle_write(const boost::system::error_code &error, size_t bytes_transferred) {
 		(void)error;
@@ -216,48 +293,17 @@ private:
 					// which will have to be moved to that pool
 					// and new pointer must be created to read next message into
 
-					LOG(INFO) << "read" <<
-						": id: " << m_message.hdr.id <<
-						", db: " << m_message.hdr.db <<
-						", cmd: " << m_message.hdr.cmd <<
-						", flags: " << m_message.hdr.flags <<
-						", size: " << m_message.hdr.size <<
-						std::endl;
+					LOG(INFO) << "read message " << m_message.to_string();
 
+					process_message();
 					read_header();
 				});
+	}
 
+	void process_message() {
+		m_fn(shared_from_this(), m_message);
 	}
 };
-
-class server {
-public:
-	server(io_service_pool& io_pool, const boost::asio::ip::tcp::endpoint &ep)
-	: m_io_pool(io_pool)
-	, m_acceptor(io_pool.get_service(), ep)
-	, m_socket(io_pool.get_service()) {
-		start_accept();
-	}
-
-private:
-	io_service_pool &m_io_pool;
-	boost::asio::ip::tcp::acceptor m_acceptor;
-	boost::asio::ip::tcp::socket m_socket;
-
-	void start_accept() {
-		m_acceptor.async_accept(m_socket,
-				[this] (boost::system::error_code ec) {
-					if (!ec) {
-						connection::pointer new_connection = connection::create(m_io_pool, std::move(m_socket));
-						new_connection->start_reading();
-					}
-
-					// reschedule acceptor
-					start_accept();
-				});
-	}
-};
-
 
 class db {
 public:
@@ -267,7 +313,19 @@ public:
 	, m_clients(other.m_clients) {
 	}
 
-	void connect(connection::pointer client) {
+	template <typename C>
+	static void create_and_insert(C &collection, uint64_t id, connection::pointer client) {
+		auto db_it = collection.find(id);
+		if (db_it == collection.end()) {
+			db d(id);
+			d.join(client);
+			collection.insert(std::pair<uint64_t, db>(id, std::move(d)));
+		} else {
+			db_it->second.join(client);
+		}
+	}
+
+	void join(connection::pointer client) {
 		std::lock_guard<std::mutex> m_guard(m_client_lock);
 		m_clients.insert(client);
 	}
@@ -281,16 +339,98 @@ private:
 	uint64_t m_id;
 	std::mutex m_client_lock;
 	std::set<connection::pointer> m_clients;
+
+	std::deque<message> m_log;
 };
 
-typedef std::function<void (scatter::message &)> handler_fn_t;
+
+class server {
+public:
+	typedef typename boost::asio::ip::tcp proto;
+
+	server(io_service_pool& io_pool, const boost::asio::ip::tcp::endpoint &ep)
+	: m_io_pool(io_pool),
+	  m_acceptor(io_pool.get_service(), ep),
+	  m_socket(io_pool.get_service()) {
+		start_accept();
+	}
+
+private:
+	io_service_pool &m_io_pool;
+	proto::acceptor m_acceptor;
+	proto::socket m_socket;
+
+	std::mutex m_lock;
+	std::map<uint64_t, db> m_dbs;
+	std::map<typename proto::endpoint, connection::pointer> m_connected;
+
+	void forward_message(connection::pointer client, message &msg) {
+	}
+
+	void message_handler(connection::pointer client, message &msg) {
+		LOG(INFO) << "server received message: " << msg.to_string();
+
+		if (msg.hdr.cmd >= SCATTER_CMD_CLIENT) {
+			forward_message(client, msg);
+			return;
+		}
+
+		switch (msg.hdr.cmd) {
+		case SCATTER_CMD_JOIN: {
+			std::unique_lock<std::mutex> guard(m_lock);
+
+			auto it = m_connected.find(client->socket().remote_endpoint());
+			if (it == m_connected.end()) {
+				LOG(ERROR) <<
+					"remote_endpoint: " << client->socket().remote_endpoint().address() <<
+						":" << client->socket().remote_endpoint().port() <<
+					", message: " << msg.to_string() <<
+					": could not find remote endpoint in the list of connected sockets, probably double join";
+				msg.hdr.status = -ENOENT;
+				break;
+			}
+
+			db::create_and_insert(m_dbs, msg.hdr.db, client);
+			msg.hdr.status = 0;
+			break;
+		}
+		default:
+			break;
+		}
+
+		if (msg.hdr.flags & SCATTER_FLAGS_NEED_ACK) {
+			client->send_reply(msg);
+		}
+	}
+
+	void start_accept() {
+		m_acceptor.async_accept(m_socket,
+				[this] (boost::system::error_code ec) {
+					if (!ec) {
+						connection::pointer client = connection::create(m_io_pool,
+								std::bind(&server::message_handler, this,
+									std::placeholders::_1, std::placeholders::_2),
+								std::move(m_socket));
+
+						std::unique_lock<std::mutex> guard(m_lock);
+						m_connected[client->socket().remote_endpoint()] = client;
+						guard.unlock();
+
+						client->start_reading();
+					}
+
+					// reschedule acceptor
+					start_accept();
+				});
+	}
+};
 
 class node {
 public:
-	node(handler_fn_t fn) : m_fn(fn) {
+	node() {
 		init(1);
 	}
-	node(const std::string &addr_str, handler_fn_t fn) : m_fn(fn) {
+	node(const std::string &addr_str) {
 		init(5);
 
 		m_server.reset(new server(*m_io_pool, m_resolver->resolve(addr_str).get()->endpoint()));
@@ -298,40 +438,38 @@ public:
 	~node() {
 	}
 
-	void connect(const std::string &addr, uint64_t db_id) {
-		connection::pointer client = connection::create(*m_io_pool);
+	connection::pointer connect(const std::string &addr, typename connection::handler_fn_t fn) {
+		connection::pointer client = connection::create(*m_io_pool, fn);
 
-		LOG(INFO) << "connect: " <<
-			": id: " << m_id <<
-			", db: " << db_id <<
-			std::endl;
+		LOG(INFO) << "connecting to addr: " << addr << ", id: " << m_id;
 
-		client->connect(m_resolver->resolve(addr).get()).get();
+		client->connect(m_resolver->resolve(addr).get());
 
+		LOG(INFO) << "connected to addr: " << addr << ", id: " << m_id;
+		return client;
+	}
+
+	void join(connection::pointer client, uint64_t db_id) {
 		message msg(0);
 
 		msg.hdr.id = m_id;
 		msg.hdr.db = db_id;
 		msg.hdr.cmd = SCATTER_CMD_JOIN;
+		msg.hdr.flags = SCATTER_FLAGS_NEED_ACK;
 		msg.encode_header();
 
-		LOG(INFO) << "connect: sending join command" <<
+		LOG(INFO) << "joining: " <<
 			": id: " << m_id <<
 			", db: " << db_id <<
 			std::endl;
 
 		client->send(msg).get();
-		LOG(INFO) << "connect: message has been written, inserting db " << db_id << std::endl;
-		auto it = m_dbs.find(db_id);
-		if (it == m_dbs.end()) {
-			db d(db_id);
-			d.connect(client);
-			m_dbs.insert(std::pair<uint64_t, db>(db_id, std::move(d)));
-		} else {
-			it->second.connect(client);
-		}
 
-		LOG(INFO) << "connected: " <<
+		std::unique_lock<std::mutex> guard(m_lock);
+		db::create_and_insert(m_dbs, db_id, client);
+		guard.unlock();
+
+		LOG(INFO) << "joined: " <<
 			": id: " << m_id <<
 			", db: " << db_id <<
 			std::endl;
@@ -342,13 +480,12 @@ public:
 	}
 
 private:
-	handler_fn_t m_fn;
-
 	uint64_t m_id;
 
 	std::unique_ptr<io_service_pool> m_io_pool;
 	std::unique_ptr<resolver<>> m_resolver;
 
+	std::mutex m_lock;
 	std::unique_ptr<server> m_server;
 
 	std::map<uint64_t, db> m_dbs;

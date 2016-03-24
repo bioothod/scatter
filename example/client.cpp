@@ -10,20 +10,22 @@ using namespace ioremap;
 class simple_map {
 public:
 	simple_map(const std::string &s) {
-		m_node.reset(new scatter::node(s, std::bind(&simple_map::process, this, std::placeholders::_1)));
+		m_node.reset(new scatter::node(s));
 	}
 	simple_map() {
-		m_node.reset(new scatter::node(std::bind(&simple_map::process, this, std::placeholders::_1)));
+		m_node.reset(new scatter::node());
 	}
 
 	void connect(const std::string &s, uint64_t db_id) {
-		m_node->connect(s, db_id);
+		auto c = m_node->connect(s, std::bind(&simple_map::process, this, std::placeholders::_1, std::placeholders::_2));
+		m_node->join(c, db_id);
 	}
 
 private:
 	std::unique_ptr<scatter::node> m_node;
 
-	void process(scatter::message &msg) {
+	void process(scatter::connection::pointer client, scatter::message &msg) {
+		LOG(INFO) << "client received message " << msg.to_string();
 	}
 };
 
