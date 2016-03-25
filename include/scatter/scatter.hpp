@@ -106,6 +106,12 @@ public:
 	message(std::shared_ptr<std::vector<char>> raw_buffer) : m_buffer(raw_buffer) {
 	}
 
+	message(const message &other) : m_buffer(other.m_buffer) {
+		hdr = other.hdr;
+		m_cpu = other.m_cpu;
+		m_data_offset = other.m_data_offset;
+	}
+
 
 	bool decode_header() {
 		hdr = *reinterpret_cast<header *>(buffer());
@@ -190,6 +196,7 @@ public:
 	typedef std::shared_ptr<connection> pointer;
 	typedef boost::asio::ip::tcp proto;
 	typedef typename proto::resolver::iterator resolver_iterator;
+	typedef std::function<void (const boost::system::error_code &, size_t)> handler_t;
 
 	typedef std::function<void (pointer client, message &)> handler_fn_t;
 
@@ -216,14 +223,13 @@ public:
 		return boost::asio::async_connect(m_socket, it, std::bind(&connection::read_header, shared_from_this()));
 	}
 
-	std::future<std::size_t> send(const message &msg) {
-		return boost::asio::async_write(m_socket,
-				boost::asio::buffer(msg.buffer(), msg.total_size()),
-				boost::asio::use_future);
+	void send(const message &msg, handler_t fn) {
+		m_strand.post(std::bind(&connection::strand_write_callback, this, msg, fn));
 	}
 
-	void send_reply(message &msg) {
+	void send_reply(const message &msg) {
 		auto self(shared_from_this());
+
 		std::shared_ptr<message> reply = std::make_shared<message>();
 		reply->hdr = msg.hdr;
 		reply->hdr.size = 0;
@@ -231,31 +237,56 @@ public:
 		reply->hdr.flags |= SCATTER_FLAGS_REPLY;
 		reply->encode_header();
 
-		return boost::asio::async_write(m_socket,
-				boost::asio::buffer(reply->buffer(), reply->total_size()),
-				[this, self, reply] (boost::system::error_code /*ec*/, std::size_t /*size*/) {
+		send(*reply, [this, self, reply] (const boost::system::error_code /*ec*/, std::size_t /*size*/) {
 				});
 	}
 
-
 private:
 	io_service_pool &m_pool;
+	boost::asio::io_service::strand m_strand;
 	handler_fn_t m_fn;
 	proto::socket m_socket;
 	message m_message;
 
+	std::deque<std::pair<message, handler_t>> m_outgoing;
+
 	connection(io_service_pool &io, handler_fn_t fn, typename proto::socket &&socket)
 		: m_pool(io),
+		  m_strand(io.get_service()),
 		  m_fn(fn),
 		  m_socket(std::move(socket)) {}
 	connection(io_service_pool &io, handler_fn_t fn)
 		: m_pool(io),
+		  m_strand(io.get_service()),
 		  m_fn(fn),
 		  m_socket(m_pool.get_service()) {}
 
-	void handle_write(const boost::system::error_code &error, size_t bytes_transferred) {
-		(void)error;
-		(void)bytes_transferred;
+	void strand_write_callback(const message &msg, handler_t fn) {
+		m_outgoing.push_back(std::pair<message, handler_t>(msg, fn));
+		if (m_outgoing.size() > 1)
+			return;
+
+		write_next();
+	}
+
+	void write_next() {
+		auto &p = m_outgoing[0];
+		message &msg = p.first;
+		handler_t &fn = p.second;
+
+		boost::asio::async_write(m_socket, boost::asio::buffer(msg.buffer(), msg.total_size()),
+				m_strand.wrap(std::bind(&connection::handle_write, this, std::ref(fn),
+						std::placeholders::_1, std::placeholders::_2)));
+	}
+
+	void handle_write(handler_t &fn, const boost::system::error_code &error, size_t bytes_transferred) {
+		fn(error, bytes_transferred);
+
+		m_outgoing.pop_front();
+
+		if (!error && !m_outgoing.empty()) {
+			write_next();
+		}
 	}
 
 	void read_header() {
@@ -326,20 +357,37 @@ public:
 	}
 
 	void join(connection::pointer client) {
-		std::lock_guard<std::mutex> m_guard(m_client_lock);
+		std::lock_guard<std::mutex> m_guard(m_lock);
 		m_clients.insert(client);
 	}
 
 	void leave(connection::pointer client) {
-		std::lock_guard<std::mutex> m_guard(m_client_lock);
+		std::lock_guard<std::mutex> m_guard(m_lock);
 		m_clients.erase(client);
+	}
+
+	// message must be already encoded
+	void send(connection::pointer self, message &msg, connection::handler_t complete) {
+		std::unique_lock<std::mutex> guard(m_lock);
+		std::vector<connection::pointer> copy(m_clients.begin(), m_clients.end());
+		guard.unlock();
+
+		for (auto &c : copy) {
+			if (c->socket().local_endpoint() == self->socket().local_endpoint())
+				continue;
+
+			auto buf = msg.raw_buffer();
+			c->send(msg, [this, buf, complete] (const boost::system::error_code &error, size_t size) {
+						complete(error, size);
+					});
+		}
 	}
 
 private:
 	uint64_t m_id;
-	std::mutex m_client_lock;
-	std::set<connection::pointer> m_clients;
 
+	std::mutex m_lock;
+	std::set<connection::pointer> m_clients;
 	std::deque<message> m_log;
 };
 
@@ -463,16 +511,23 @@ public:
 			", db: " << db_id <<
 			std::endl;
 
-		client->send(msg).get();
+		client->send(msg,
+			[&] (const boost::system::error_code &ec, size_t) {
+				if (ec) {
+					throw_error(ec.value(), "could not join to database id: %ld, error: %s", db_id, ec.message().c_str());
+				}
 
-		std::unique_lock<std::mutex> guard(m_lock);
-		db::create_and_insert(m_dbs, db_id, client);
-		guard.unlock();
+				std::unique_lock<std::mutex> guard(m_lock);
+				db::create_and_insert(m_dbs, db_id, client);
+				guard.unlock();
 
-		LOG(INFO) << "joined: " <<
-			": id: " << m_id <<
-			", db: " << db_id <<
-			std::endl;
+				LOG(INFO) << "joined: " <<
+					": id: " << m_id <<
+					", db: " << db_id <<
+					std::endl;
+			});
+
+
 	}
 
 	int send() {
