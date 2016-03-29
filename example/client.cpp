@@ -16,16 +16,27 @@ public:
 		m_node.reset(new scatter::node());
 	}
 
-	void connect(const std::string &s, uint64_t db_id) {
+	void connect(const std::string &s, uint64_t db) {
 		auto c = m_node->connect(s, std::bind(&simple_map::process, this, std::placeholders::_1, std::placeholders::_2));
-		m_node->join(c, db_id);
+		m_node->join(c, db);
+	}
+
+	void send(const std::string &s, uint64_t db, scatter::connection::handler_t complete) {
+		scatter::message msg(s.size() + 1);
+		msg.hdr.db = db;
+		msg.hdr.cmd = scatter::SCATTER_CMD_CLIENT + 1;
+		msg.hdr.flags = SCATTER_FLAGS_NEED_ACK;
+		msg.hdr.id = 123456;
+		msg.hdr.size = s.size() + 1;
+		msg.append(s.c_str(), s.size() + 1);
+		m_node->send(msg, complete);
 	}
 
 private:
 	std::unique_ptr<scatter::node> m_node;
 
 	void process(scatter::connection::pointer client, scatter::message &msg) {
-		LOG(INFO) << "client received message " << msg.to_string();
+		LOG(INFO) << "client received message: " << msg.to_string();
 	}
 };
 
@@ -86,6 +97,18 @@ int main(int argc, char *argv[])
 
 	for (const auto &addr : remotes) {
 		n->connect(addr, db);
+
+		time_t t = time(NULL);
+		std::string s = "this is a test at " + std::string(ctime(&t));
+
+		n->send(s, db, [s] (const boost::system::error_code &ec, size_t) {
+					if (ec) {
+						std::cout << "could not write data: " << ec.message() << std::endl;
+						return;
+					}
+
+					std::cout << "successfully wrote data: " << s << std::endl;
+				});
 	}
 
 	while (true) {
