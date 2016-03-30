@@ -21,7 +21,7 @@ public:
 		m_node->join(c, db);
 	}
 
-	void send(const std::string &s, uint64_t db, scatter::connection::handler_t complete) {
+	void send(const std::string &s, uint64_t db, scatter::connection::handler_fn_t complete) {
 		scatter::message msg(s.size() + 1);
 		msg.hdr.db = db;
 		msg.hdr.cmd = scatter::SCATTER_CMD_CLIENT + 1;
@@ -36,7 +36,7 @@ private:
 	std::unique_ptr<scatter::node> m_node;
 
 	void process(scatter::connection::pointer client, scatter::message &msg) {
-		LOG(INFO) << "client received message: " << msg.to_string();
+		LOG(INFO) << "client " << client->connection_string() << " received message: " << msg.to_string();
 	}
 };
 
@@ -101,9 +101,9 @@ int main(int argc, char *argv[])
 		time_t t = time(NULL);
 		std::string s = "this is a test at " + std::string(ctime(&t));
 
-		n->send(s, db, [s] (const boost::system::error_code &ec, size_t) {
-					if (ec) {
-						std::cout << "could not write data: " << ec.message() << std::endl;
+		n->send(s, db, [s] (scatter::connection::pointer self, scatter::message &msg) {
+					if (msg.hdr.status) {
+						LOG(ERROR) << "could not write data, error status: " << msg.hdr.status;
 						return;
 					}
 
