@@ -1,4 +1,10 @@
-add_library(scatter exception.cpp)
+add_library(scatter SHARED
+	exception.cpp
+	connection.cpp
+	message.cpp
+	node.cpp
+	server.cpp
+)
 target_link_libraries(scatter
 	${FOLLY_LIBRARIES}
 	${WANGLE_LIBRARIES}
