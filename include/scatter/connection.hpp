@@ -21,15 +21,15 @@ public:
 	typedef std::shared_ptr<connection> pointer;
 	typedef boost::asio::ip::tcp proto;
 	typedef typename proto::resolver::iterator resolver_iterator;
-	typedef std::function<void (const boost::system::error_code &, size_t)> handler_t;
 
-	typedef std::function<void (pointer client, message &)> handler_fn_t;
+	typedef std::function<void (pointer client, message &)> process_fn_t;
+	typedef std::function<void (pointer client, const boost::system::error_code &)> error_fn_t;
 
-	static pointer create(io_service_pool& io_pool, handler_fn_t fn, typename proto::socket &&socket) {
-		return pointer(new connection(io_pool, fn, std::move(socket)));
+	static pointer create(io_service_pool& io_pool, process_fn_t process, error_fn_t error, typename proto::socket &&socket) {
+		return pointer(new connection(io_pool, process, error, std::move(socket)));
 	}
-	static pointer create(io_service_pool& io_pool, handler_fn_t fn) {
-		return pointer(new connection(io_pool, fn));
+	static pointer create(io_service_pool& io_pool, process_fn_t process, error_fn_t error) {
+		return pointer(new connection(io_pool, process, error));
 	}
 
 	proto::socket& socket();
@@ -41,13 +41,15 @@ public:
 	void connect(const resolver_iterator it);
 
 	// message has to be already encoded
-	void send(const message &msg, handler_fn_t fn);
+	void send(const message &msg, process_fn_t complete);
 	void send_reply(const message &msg);
 
 private:
 	io_service_pool &m_pool;
 	boost::asio::io_service::strand m_strand;
-	handler_fn_t m_fn;
+	process_fn_t m_process;
+	error_fn_t m_error;
+
 	proto::socket m_socket;
 	std::string m_local_string;
 	std::string m_remote_string;
@@ -57,17 +59,17 @@ private:
 		uint64_t		id;
 		uint64_t		flags;
 		message::raw_buffer_t	buf;
-		handler_fn_t		complete;
+		process_fn_t		complete;
 	} completion_t;
 
 	std::mutex m_lock;
 	std::unordered_map<uint64_t, completion_t> m_sent;
 	std::deque<completion_t> m_outgoing;
 
-	connection(io_service_pool &io, handler_fn_t fn, typename proto::socket &&socket);
-	connection(io_service_pool &io, handler_fn_t fn);
+	connection(io_service_pool &io, process_fn_t process, error_fn_t errror, typename proto::socket &&socket);
+	connection(io_service_pool &io, process_fn_t process, error_fn_t error);
 
-	void strand_write_callback(uint64_t id, uint64_t flags, message::raw_buffer_t buf, handler_fn_t fn);
+	void strand_write_callback(uint64_t id, uint64_t flags, message::raw_buffer_t buf, process_fn_t complete);
 	void write_next_buf(message::raw_buffer_t buf);
 	void write_completed(const boost::system::error_code &error, size_t bytes_transferred);
 

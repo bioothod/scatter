@@ -16,9 +16,10 @@ node::~node()
 {
 }
 
-connection::pointer node::connect(const std::string &addr, typename connection::handler_fn_t fn)
+connection::pointer node::connect(const std::string &addr, typename connection::process_fn_t process)
 {
-	connection::pointer client = connection::create(*m_io_pool, fn);
+	connection::pointer client = connection::create(*m_io_pool, process,
+			std::bind(&node::drop, this, std::placeholders::_1, std::placeholders::_2));
 
 	LOG(INFO) << "connecting to addr: " << addr << ", id: " << m_id;
 
@@ -68,8 +69,18 @@ void node::join(connection::pointer cn, uint64_t db_id)
 	f.wait();
 }
 
+void node::drop(connection::pointer cn, const boost::system::error_code &ec)
+{
+	std::unique_lock<std::mutex> guard(m_lock);
+	for (auto &p : m_dbs) {
+		db &db = p.second;
+
+		db.leave(cn);
+	}
+}
+
 // message should be encoded
-void node::send(message &msg, connection::handler_fn_t complete)
+void node::send(message &msg, connection::process_fn_t complete)
 {
 	long db = msg.db();
 

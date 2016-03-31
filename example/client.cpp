@@ -21,7 +21,7 @@ public:
 		m_node->join(c, db);
 	}
 
-	void send(const std::string &s, uint64_t db, scatter::connection::handler_fn_t complete) {
+	void send(const std::string &s, uint64_t db, scatter::connection::process_fn_t complete) {
 		scatter::message msg(s.size() + 1);
 		msg.hdr.db = db;
 		msg.hdr.cmd = scatter::SCATTER_CMD_CLIENT + 1;

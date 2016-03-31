@@ -30,6 +30,7 @@ private:
 	void message_handler(connection::pointer client, message &msg);
 
 	void start_accept();
+	void drop(connection::pointer cn, const boost::system::error_code &ec);
 };
 
 }} // namespace ioremap::scatter

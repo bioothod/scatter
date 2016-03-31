@@ -44,12 +44,12 @@ public:
 				", command: leave";
 	}
 
-	void send(message &msg, connection::handler_fn_t complete) {
+	void send(message &msg, connection::process_fn_t complete) {
 		send(std::shared_ptr<connection>(), msg, complete);
 	}
 
 	// message must be already encoded
-	void send(connection::pointer self, message &msg, connection::handler_fn_t complete) {
+	void send(connection::pointer self, message &msg, connection::process_fn_t complete) {
 		std::unique_lock<std::mutex> guard(m_lock);
 		std::vector<connection::pointer> copy(m_clients.begin(), m_clients.end());
 		guard.unlock();

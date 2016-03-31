@@ -11,12 +11,12 @@ public:
 	node(const std::string &addr_str);
 	~node();
 
-	connection::pointer connect(const std::string &addr, typename connection::handler_fn_t fn);
+	connection::pointer connect(const std::string &addr, typename connection::process_fn_t process);
 
 	void join(connection::pointer cn, uint64_t db_id);
 
 	// message should be encoded
-	void send(message &msg, connection::handler_fn_t complete);
+	void send(message &msg, connection::process_fn_t complete);
 
 private:
 	uint64_t m_id;
@@ -30,6 +30,7 @@ private:
 	std::map<uint64_t, db> m_dbs;
 
 	void init(int io_pool_size);
+	void drop(connection::pointer cn, const boost::system::error_code &ec);
 };
 
 }} // namespace ioremap::scatter

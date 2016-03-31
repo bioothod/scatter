@@ -81,6 +81,8 @@ void server::start_accept()
 					connection::pointer client = connection::create(m_io_pool,
 							std::bind(&server::message_handler, this,
 								std::placeholders::_1, std::placeholders::_2),
+							std::bind(&server::drop, this,
+								std::placeholders::_1, std::placeholders::_2),
 							std::move(m_socket));
 
 					std::unique_lock<std::mutex> guard(m_lock);
@@ -93,6 +95,18 @@ void server::start_accept()
 				// reschedule acceptor
 				start_accept();
 			});
+}
+
+void server::drop(connection::pointer cn, const boost::system::error_code &ec)
+{
+	std::unique_lock<std::mutex> guard(m_lock);
+	m_connected.erase(cn->socket().remote_endpoint());
+
+	for (auto &p : m_dbs) {
+		db &db = p.second;
+
+		db.leave(cn);
+	}
 }
 
 }} // namespace ioremap::scatter

@@ -50,13 +50,13 @@ void connection::connect(const connection::resolver_iterator it)
 }
 
 // message has to be already encoded
-void connection::send(const message &msg, connection::handler_fn_t fn)
+void connection::send(const message &msg, connection::process_fn_t complete)
 {
 	auto buf = msg.raw_buffer();
 	uint64_t id = msg.id();
 	uint64_t flags = msg.flags();
 
-	m_strand.post(std::bind(&connection::strand_write_callback, this, id, flags, buf, fn));
+	m_strand.post(std::bind(&connection::strand_write_callback, this, id, flags, buf, complete));
 }
 
 void connection::send_reply(const message &msg)
@@ -74,26 +74,28 @@ void connection::send_reply(const message &msg)
 			});
 }
 
-connection::connection(io_service_pool &io, connection::handler_fn_t fn, typename connection::proto::socket &&socket)
+connection::connection(io_service_pool &io, connection::process_fn_t process, error_fn_t error, typename connection::proto::socket &&socket)
 	: m_pool(io),
 	  m_strand(io.get_service()),
-	  m_fn(fn),
+	  m_process(process),
+	  m_error(error),
 	  m_socket(std::move(socket))
 {
 	m_local_string = m_socket.local_endpoint().address().to_string() + ":" + std::to_string(m_socket.local_endpoint().port());
 	m_remote_string = m_socket.remote_endpoint().address().to_string() + ":" + std::to_string(m_socket.remote_endpoint().port());
 }
-connection::connection(io_service_pool &io, connection::handler_fn_t fn)
+connection::connection(io_service_pool &io, connection::process_fn_t process, error_fn_t error)
 	: m_pool(io),
 	  m_strand(io.get_service()),
-	  m_fn(fn),
+	  m_process(process),
+	  m_error(error),
 	  m_socket(io.get_service())
 {
 }
 
-void connection::strand_write_callback(uint64_t id, uint64_t flags, message::raw_buffer_t buf, connection::handler_fn_t fn)
+void connection::strand_write_callback(uint64_t id, uint64_t flags, message::raw_buffer_t buf, connection::process_fn_t complete)
 {
-	connection::completion_t cmpl{ id, flags, buf, fn };
+	connection::completion_t cmpl{ id, flags, buf, complete };
 
 	std::unique_lock<std::mutex> guard(m_lock);
 	m_outgoing.push_back(cmpl);
@@ -154,6 +156,7 @@ void connection::read_header()
 				if (ec || !m_message.decode_header()) {
 					LOG(ERROR) << "connection: " << connection_string() << ", error: " << ec.message();
 					// reset connection, drop it from database
+					m_error(shared_from_this(), ec);
 					return;
 				}
 
@@ -173,6 +176,7 @@ void connection::read_data()
 					LOG(ERROR) << "connection: " << connection_string() << ", error: " << ec.message();
 
 					// reset connection, drop it from database
+					m_error(shared_from_this(), ec);
 					return;
 				}
 				
@@ -217,7 +221,7 @@ void connection::process_message()
 		return;
 	}
 
-	m_fn(shared_from_this(), m_message);
+	m_process(shared_from_this(), m_message);
 	if (m_message.hdr.flags & SCATTER_FLAGS_NEED_ACK) {
 		send_reply(m_message);
 	}
