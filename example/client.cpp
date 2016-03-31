@@ -1,4 +1,4 @@
-#include "scatter/scatter.hpp"
+#include "scatter/node.hpp"
 
 #include <boost/algorithm/string.hpp>
 #include <boost/program_options.hpp>
@@ -29,6 +29,8 @@ public:
 		msg.hdr.id = 123456;
 		msg.hdr.size = s.size() + 1;
 		msg.append(s.c_str(), s.size() + 1);
+		msg.encode_header();
+
 		m_node->send(msg, complete);
 	}
 
