@@ -1,7 +1,7 @@
 #pragma once
 
+#include "scatter/broadcast.hpp"
 #include "scatter/connection.hpp"
-#include "scatter/db.hpp"
 #include "scatter/pool.hpp"
 
 namespace ioremap { namespace scatter {
@@ -18,7 +18,7 @@ private:
 	proto::socket m_socket;
 
 	std::mutex m_lock;
-	std::map<uint64_t, db> m_dbs;
+	std::map<uint64_t, broadcast> m_bcast;
 	std::map<typename proto::endpoint, connection::pointer> m_connected;
 
 	void forward_message(connection::pointer client, message &msg);

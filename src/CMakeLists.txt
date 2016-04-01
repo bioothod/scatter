@@ -1,6 +1,7 @@
 add_library(scatter SHARED
-	exception.cpp
+	broadcast.cpp
 	connection.cpp
+	exception.cpp
 	message.cpp
 	node.cpp
 	server.cpp

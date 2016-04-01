@@ -12,28 +12,29 @@ server::server(io_service_pool& io_pool, const boost::asio::ip::tcp::endpoint &e
 void server::forward_message(connection::pointer client, message &msg)
 {
 	std::unique_lock<std::mutex> guard(m_lock);
-	auto it = m_dbs.find(msg.db());
-	if (it == m_dbs.end()) {
+	auto it = m_bcast.find(msg.db());
+	if (it == m_bcast.end()) {
 		guard.unlock();
 		msg.hdr.status = -ENOENT;
 		return;
 	}
 
 	auto sptr = msg.raw_buffer();
-	int error = -ENOENT;
 	LOG(INFO) << "forward: db: " << msg.db() <<
 		", message: " << msg.to_string();
-	it->second.send(client, msg, [this, sptr, &error] (connection::pointer self, message &reply) {
+	it->second.send(client, msg, [this, sptr] (connection::pointer self, message &reply) {
 				LOG(INFO) << "forward: connection: " << self->connection_string() <<
 					", db: " << reply.db() <<
 					", reply: " << reply.to_string();
-				if (!reply.hdr.status) {
-					error = 0;
-				}
+
+				self->send_reply(reply);
 			});
 	guard.unlock();
 
-	msg.hdr.status = error;
+	// clear need-ack bit to prevent server from sending ack back to client
+	// since we have to wait for all connections in broadcast group to receive this
+	// message and send reply, and only after that ack can be sent to the original client
+	msg.hdr.flags &= ~SCATTER_FLAGS_NEED_ACK;
 }
 
 // message has been already decoded
@@ -64,7 +65,7 @@ void server::message_handler(connection::pointer client, message &msg)
 			break;
 		}
 
-		db::create_and_insert(m_dbs, msg.hdr.db, client);
+		broadcast::create_and_insert(m_bcast, msg.db(), client);
 		msg.hdr.status = 0;
 		break;
 	}
@@ -85,6 +86,8 @@ void server::start_accept()
 								std::placeholders::_1, std::placeholders::_2),
 							std::move(m_socket));
 
+					LOG(INFO) << "server: accepted new client: " << client->connection_string();
+
 					std::unique_lock<std::mutex> guard(m_lock);
 					m_connected[client->socket().remote_endpoint()] = client;
 					guard.unlock();
@@ -102,10 +105,10 @@ void server::drop(connection::pointer cn, const boost::system::error_code &ec)
 	std::unique_lock<std::mutex> guard(m_lock);
 	m_connected.erase(cn->socket().remote_endpoint());
 
-	for (auto &p : m_dbs) {
-		db &db = p.second;
+	for (auto &p : m_bcast) {
+		broadcast &bcast = p.second;
 
-		db.leave(cn);
+		bcast.leave(cn);
 	}
 }
 

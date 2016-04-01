@@ -29,18 +29,18 @@ connection::pointer node::connect(const std::string &addr, typename connection::
 	return client;
 }
 
-void node::join(connection::pointer cn, uint64_t db_id)
+void node::join(connection::pointer cn, uint64_t db)
 {
 	message msg(0);
 
 	msg.hdr.id = m_id;
-	msg.hdr.db = db_id;
+	msg.hdr.db = db;
 	msg.hdr.cmd = SCATTER_CMD_JOIN;
 	msg.hdr.flags = SCATTER_FLAGS_NEED_ACK;
 
 	LOG(INFO) << "joining: " <<
 		": id: " << m_id <<
-		", db: " << db_id <<
+		", db: " << db <<
 		std::endl;
 
 	msg.encode_header();
@@ -51,19 +51,19 @@ void node::join(connection::pointer cn, uint64_t db_id)
 	cn->send(msg,
 		[&] (scatter::connection::pointer self, scatter::message &msg) {
 			if (msg.hdr.status) {
-				throw_error(msg.hdr.status, "could not join database id: %ld, error: %d", db_id, msg.hdr.status);
+				throw_error(msg.hdr.status, "could not join database id: %ld, error: %d", db, msg.hdr.status);
 			}
 
 			std::unique_lock<std::mutex> guard(m_lock);
-			db::create_and_insert(m_dbs, db_id, cn);
+			broadcast::create_and_insert(m_bcast, db, cn);
 			guard.unlock();
 
 			LOG(INFO) << "joined: " <<
 				": id: " << m_id <<
-				", db: " << db_id <<
+				", db: " << db <<
 				std::endl;
 
-			p.set_value(db_id);
+			p.set_value(db);
 		});
 
 	f.wait();
@@ -72,10 +72,10 @@ void node::join(connection::pointer cn, uint64_t db_id)
 void node::drop(connection::pointer cn, const boost::system::error_code &ec)
 {
 	std::unique_lock<std::mutex> guard(m_lock);
-	for (auto &p : m_dbs) {
-		db &db = p.second;
+	for (auto &p : m_bcast) {
+		broadcast &bcast = p.second;
 
-		db.leave(cn);
+		bcast.leave(cn);
 	}
 }
 
@@ -85,8 +85,8 @@ void node::send(message &msg, connection::process_fn_t complete)
 	long db = msg.db();
 
 	std::unique_lock<std::mutex> guard(m_lock);
-	auto it = m_dbs.find(db);
-	if (it == m_dbs.end()) {
+	auto it = m_bcast.find(db);
+	if (it == m_bcast.end()) {
 		throw_error(-ENOENT, "node didn't join to database %ld", db);
 	}
 

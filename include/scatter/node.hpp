@@ -27,7 +27,7 @@ private:
 	std::mutex m_lock;
 	std::unique_ptr<server> m_server;
 
-	std::map<uint64_t, db> m_dbs;
+	std::map<uint64_t, broadcast> m_bcast;
 
 	void init(int io_pool_size);
 	void drop(connection::pointer cn, const boost::system::error_code &ec);

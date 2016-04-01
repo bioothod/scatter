@@ -70,6 +70,8 @@ void connection::send_reply(const message &msg)
 	reply->hdr.flags |= SCATTER_FLAGS_REPLY;
 	reply->encode_header();
 
+	LOG(INFO) << "connection: " << connection_string() << ", sending reply back: " << reply->to_string();
+
 	send(*reply, [this, self, reply] (pointer, message &) {
 			});
 }
