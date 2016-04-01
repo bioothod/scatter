@@ -31,6 +31,16 @@ private:
 
 	void init(int io_pool_size);
 	void drop(connection::pointer cn, const boost::system::error_code &ec);
+
+	// these are part of the server node
+	std::map<connection::proto::endpoint, connection::pointer> m_connected;
+	void forward_message(connection::pointer client, message &msg);
+
+	// message has been already decoded
+	// processing function should not send ack itself,
+	// if it does send ack, it has to clear SCATTER_FLAGS_NEED_ACK bit in msg.flags,
+	// otherwise connection's code will send another ack
+	void message_handler(connection::pointer client, message &msg);
 };
 
 }} // namespace ioremap::scatter
