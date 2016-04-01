@@ -38,7 +38,9 @@ private:
 	std::unique_ptr<scatter::node> m_node;
 
 	void process(scatter::connection::pointer client, scatter::message &msg) {
-		LOG(INFO) << "client " << client->connection_string() << " received message: " << msg.to_string();
+		LOG(INFO) << "connection: " << client->connection_string() <<
+			", received message: " << msg.to_string() <<
+			", received data: " << (char *)msg.data() ;
 	}
 };
 
