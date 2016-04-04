@@ -72,7 +72,10 @@ void node::join(connection::pointer cn, uint64_t db)
 	cn->send(msg,
 		[&] (scatter::connection::pointer self, scatter::message &msg) {
 			if (msg.hdr.status) {
-				throw_error(msg.hdr.status, "could not join database id: %ld, error: %d", db, msg.hdr.status);
+				p.set_exception(std::make_exception_ptr(create_error(msg.hdr.status,
+							"could not join database id: %ld, error: %d",
+							db, msg.hdr.status)));
+				return;
 			}
 
 			std::unique_lock<std::mutex> guard(m_lock);
@@ -87,7 +90,7 @@ void node::join(connection::pointer cn, uint64_t db)
 			p.set_value(db);
 		});
 
-	f.wait();
+	f.get();
 }
 
 void node::drop(connection::pointer cn, const boost::system::error_code &ec)

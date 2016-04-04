@@ -29,12 +29,19 @@ void connection::connect(const connection::resolver_iterator it)
 
 	auto self(shared_from_this());
 	boost::asio::async_connect(m_socket, it,
-			[this, self, &p] (const boost::system::error_code &ec, const connection::resolver_iterator it) {
+			[this, self, &p, &it] (const boost::system::error_code &ec, const connection::resolver_iterator res) {
+				(void) res;
+
 				if (ec) {
-					throw_error(ec.value(), "could not connect to %s:%d: %s",
+					LOG(ERROR) << "could not connect to " <<
+							it->endpoint().address().to_string().c_str() << ":" << it->endpoint().port() <<
+							", error: " << ec.message().c_str();
+
+					p.set_exception(std::make_exception_ptr(create_error(ec.value(), "could not connect to %s:%d: %s",
 							it->endpoint().address().to_string().c_str(),
 							it->endpoint().port(),
-							ec.message().c_str());
+							ec.message().c_str())));
+					return;
 				}
 
 				m_local_string = m_socket.local_endpoint().address().to_string() + ":" +
@@ -46,7 +53,7 @@ void connection::connect(const connection::resolver_iterator it)
 				read_header();
 			});
 
-	f.wait();
+	f.get();
 }
 
 // message has to be already encoded
