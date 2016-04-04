@@ -4,6 +4,7 @@ add_library(scatter SHARED
 	exception.cpp
 	message.cpp
 	node.cpp
+	route.cpp
 	server.cpp
 )
 target_link_libraries(scatter

@@ -25,6 +25,8 @@ public:
 	typedef std::function<void (pointer client, message &)> process_fn_t;
 	typedef std::function<void (pointer client, const boost::system::error_code &)> error_fn_t;
 
+	typedef uint64_t cid_t;
+
 	static pointer create(io_service_pool& io_pool, process_fn_t process, error_fn_t error, typename proto::socket &&socket) {
 		return pointer(new connection(io_pool, process, error, std::move(socket)));
 	}
@@ -44,6 +46,9 @@ public:
 	void send(const message &msg, process_fn_t complete);
 	void send_reply(const message &msg);
 
+	const std::vector<cid_t> ids() const {
+		return m_cids;
+	}
 private:
 	io_service_pool &m_pool;
 	boost::asio::io_service::strand m_strand;
@@ -66,6 +71,9 @@ private:
 	std::unordered_map<uint64_t, completion_t> m_sent;
 	std::deque<completion_t> m_outgoing;
 
+	// we have connected to remote node, these are ids for that remote node
+	std::vector<cid_t> m_cids;
+
 	connection(io_service_pool &io, process_fn_t process, error_fn_t errror, typename proto::socket &&socket);
 	connection(io_service_pool &io, process_fn_t process, error_fn_t error);
 
@@ -76,6 +84,10 @@ private:
 	void read_header();
 	void read_data();
 	void process_message();
+
+	// called from @connect() method to obtain ids of the remote node
+	void request_remote_ids();
+	void parse_remote_ids(std::promise<int> &p, message &msg);
 };
 
 }} // namespace ioremap::scatter

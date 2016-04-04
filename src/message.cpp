@@ -25,6 +25,7 @@ std::string header::cmd_string() const
 		static std::map<int, std::string> command_strings = {
 			{ SCATTER_CMD_SERVER, "[server]" },
 			{ SCATTER_CMD_JOIN, "[join]" },
+			{ SCATTER_CMD_REMOTE_IDS, "[remote_ids]" },
 			{ SCATTER_CMD_CLIENT, "[client]" },
 		};
 

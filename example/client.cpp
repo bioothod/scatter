@@ -18,7 +18,7 @@ public:
 
 	void connect(const std::string &s, uint64_t db) {
 		auto c = m_node->connect(s, std::bind(&simple_map::process, this, std::placeholders::_1, std::placeholders::_2));
-		m_node->join(c, db);
+		m_node->join(db);
 	}
 
 	void send(const std::string &s, uint64_t db, scatter::connection::process_fn_t complete) {

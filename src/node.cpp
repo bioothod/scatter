@@ -1,5 +1,7 @@
 #include "scatter/node.hpp"
 
+#include <msgpack.hpp>
+
 namespace ioremap { namespace scatter {
 
 node::node()
@@ -9,6 +11,8 @@ node::node()
 node::node(const std::string &addr_str)
 {
 	init(5);
+
+	generate_ids();
 
 	m_server.reset(new server(*m_io_pool, m_resolver->resolve(addr_str).get()->endpoint(),
 			[this] (const boost::system::error_code &ec, connection::proto::socket &&socket) {
@@ -37,6 +41,14 @@ node::~node()
 {
 }
 
+void node::generate_ids()
+{
+	m_cids.resize(10);
+	for (auto &id: m_cids) {
+		id = rand();
+	}
+}
+
 connection::pointer node::connect(const std::string &addr, typename connection::process_fn_t process)
 {
 	connection::pointer client = connection::create(*m_io_pool, process,
@@ -45,12 +57,13 @@ connection::pointer node::connect(const std::string &addr, typename connection::
 	LOG(INFO) << "connecting to addr: " << addr << ", id: " << m_id;
 
 	client->connect(m_resolver->resolve(addr).get());
+	m_route.add(client);
 
 	LOG(INFO) << "connected to addr: " << addr << ", id: " << m_id;
 	return client;
 }
 
-void node::join(connection::pointer cn, uint64_t db)
+void node::join(uint64_t db)
 {
 	message msg(0);
 
@@ -69,6 +82,10 @@ void node::join(connection::pointer cn, uint64_t db)
 	std::promise<int> p;
 	std::future<int> f = p.get_future();
 
+	auto cn = m_route.find(db);
+	if (!cn)
+		throw_error(-ENOENT, "node is not connected to anything which can handle database %ld", db);
+
 	cn->send(msg,
 		[&] (scatter::connection::pointer self, scatter::message &msg) {
 			if (msg.hdr.status) {
@@ -77,10 +94,6 @@ void node::join(connection::pointer cn, uint64_t db)
 							db, msg.hdr.status)));
 				return;
 			}
-
-			std::unique_lock<std::mutex> guard(m_lock);
-			broadcast::create_and_insert(m_bcast, db, self);
-			guard.unlock();
 
 			LOG(INFO) << "joined: " <<
 				": id: " << m_id <<
@@ -100,6 +113,7 @@ void node::drop(connection::pointer cn, const boost::system::error_code &ec)
 	std::unique_lock<std::mutex> guard(m_lock);
 
 	m_connected.erase(cn->socket().remote_endpoint());
+	m_route.remove(cn);
 
 	for (auto &p : m_bcast) {
 		broadcast &bcast = p.second;
@@ -113,13 +127,15 @@ void node::send(message &msg, connection::process_fn_t complete)
 {
 	long db = msg.db();
 
-	std::unique_lock<std::mutex> guard(m_lock);
-	auto it = m_bcast.find(db);
-	if (it == m_bcast.end()) {
-		throw_error(-ENOENT, "node didn't join to database %ld", db);
+	auto cn = m_route.find(db);
+	if (!cn) {
+		LOG(ERROR) << "send: message: " << msg.to_string() <<
+			", error: node is not connected to anything which can handle database " << db;
+
+		throw_error(-ENOENT, "node is not connected to anything which can handle database %ld", db);
 	}
 
-	it->second.send(msg, complete);
+	cn->send(msg, complete);
 }
 
 void node::init(int io_pool_size)
@@ -188,6 +204,28 @@ void node::message_handler(connection::pointer client, message &msg)
 
 		broadcast::create_and_insert(m_bcast, msg.db(), client);
 		msg.hdr.status = 0;
+		break;
+	}
+	case SCATTER_CMD_REMOTE_IDS: {
+		std::stringstream buffer;
+		msgpack::pack(buffer, m_cids);
+
+		std::string rdata = buffer.str();
+
+		message reply(rdata.size());
+		reply.append(rdata.data(), rdata.size());
+
+		reply.hdr.size = rdata.size();
+		reply.hdr.cmd = SCATTER_CMD_REMOTE_IDS;
+		reply.hdr.flags = SCATTER_FLAGS_REPLY;
+		reply.hdr.id = msg.hdr.id;
+		reply.hdr.db = msg.hdr.db;
+		reply.encode_header();
+
+		client->send(reply, [] (connection::pointer, message &) {});
+
+		// server has sent reply, no need to send another one
+		msg.hdr.flags &= ~SCATTER_FLAGS_NEED_ACK;
 		break;
 	}
 	default:

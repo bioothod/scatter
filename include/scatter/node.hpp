@@ -1,6 +1,7 @@
 #pragma once
 
 #include "scatter/connection.hpp"
+#include "scatter/route.hpp"
 #include "scatter/server.hpp"
 
 namespace ioremap { namespace scatter {
@@ -13,7 +14,7 @@ public:
 
 	connection::pointer connect(const std::string &addr, typename connection::process_fn_t process);
 
-	void join(connection::pointer cn, uint64_t db_id);
+	void join(uint64_t db_id);
 
 	// message should be encoded
 	void send(message &msg, connection::process_fn_t complete);
@@ -29,7 +30,12 @@ private:
 
 	std::map<uint64_t, broadcast> m_bcast;
 
+	std::vector<connection::cid_t> m_cids;
+	route m_route;
+
 	void init(int io_pool_size);
+	void generate_ids();
+
 	void drop(connection::pointer cn, const boost::system::error_code &ec);
 
 	// these are part of the server node

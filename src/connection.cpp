@@ -1,6 +1,28 @@
 #include "scatter/connection.hpp"
 
+#include <msgpack.hpp>
+
 namespace ioremap { namespace scatter {
+
+connection::connection(io_service_pool &io, connection::process_fn_t process, error_fn_t error, typename connection::proto::socket &&socket)
+	: m_pool(io),
+	  m_strand(io.get_service()),
+	  m_process(process),
+	  m_error(error),
+	  m_socket(std::move(socket))
+{
+	m_local_string = m_socket.local_endpoint().address().to_string() + ":" + std::to_string(m_socket.local_endpoint().port());
+	m_remote_string = m_socket.remote_endpoint().address().to_string() + ":" + std::to_string(m_socket.remote_endpoint().port());
+}
+connection::connection(io_service_pool &io, connection::process_fn_t process, error_fn_t error)
+	: m_pool(io),
+	  m_strand(io.get_service()),
+	  m_process(process),
+	  m_error(error),
+	  m_socket(io.get_service())
+{
+}
+
 
 connection::proto::socket& connection::socket()
 {
@@ -54,6 +76,53 @@ void connection::connect(const connection::resolver_iterator it)
 			});
 
 	f.get();
+
+	request_remote_ids();
+}
+
+void connection::request_remote_ids()
+{
+	std::promise<int> p;
+	std::future<int> f = p.get_future();
+
+	auto self(shared_from_this());
+
+	std::shared_ptr<message> msg = std::make_shared<message>();
+	msg->hdr.flags |= SCATTER_FLAGS_NEED_ACK;
+	msg->hdr.cmd = SCATTER_CMD_REMOTE_IDS;
+	msg->encode_header();
+
+	send(*msg, [this, self, msg, &p] (pointer, message &reply) {
+				if (reply.hdr.status) {
+					LOG(ERROR) << "connection: " << connection_string() << ", reply: " << reply.to_string() <<
+						", could not request remote ids: " << reply.hdr.status;
+					p.set_exception(std::make_exception_ptr(create_error(reply.hdr.status,
+									"could not request remote ids")));
+					return;
+				}
+
+				parse_remote_ids(p, reply);
+			});
+
+	f.get();
+}
+
+// message is already decoded
+void connection::parse_remote_ids(std::promise<int> &p, message &msg)
+{
+	try {
+		msgpack::unpacked up;
+		msgpack::unpack(&up, msg.data(), msg.hdr.size);
+
+		up.get().convert(&m_cids);
+	} catch (const std::exception &e) {
+		p.set_exception(std::make_exception_ptr(create_error(-EINVAL, "could not unpack remote ids reply: %s: %s",
+						msg.to_string().c_str(), e.what())));
+		return;
+	}
+
+	LOG(INFO) << "connection: " << connection_string() << ", received " << m_cids.size() << " remote ids";
+	p.set_value(0);
 }
 
 // message has to be already encoded
@@ -62,6 +131,8 @@ void connection::send(const message &msg, connection::process_fn_t complete)
 	auto buf = msg.raw_buffer();
 	uint64_t id = msg.id();
 	uint64_t flags = msg.flags();
+
+	LOG(INFO) << "connection: " << connection_string() << ", sending data: " << msg.to_string();
 
 	m_strand.post(std::bind(&connection::strand_write_callback, this, id, flags, buf, complete));
 }
@@ -81,25 +152,6 @@ void connection::send_reply(const message &msg)
 
 	send(*reply, [this, self, reply] (pointer, message &) {
 			});
-}
-
-connection::connection(io_service_pool &io, connection::process_fn_t process, error_fn_t error, typename connection::proto::socket &&socket)
-	: m_pool(io),
-	  m_strand(io.get_service()),
-	  m_process(process),
-	  m_error(error),
-	  m_socket(std::move(socket))
-{
-	m_local_string = m_socket.local_endpoint().address().to_string() + ":" + std::to_string(m_socket.local_endpoint().port());
-	m_remote_string = m_socket.remote_endpoint().address().to_string() + ":" + std::to_string(m_socket.remote_endpoint().port());
-}
-connection::connection(io_service_pool &io, connection::process_fn_t process, error_fn_t error)
-	: m_pool(io),
-	  m_strand(io.get_service()),
-	  m_process(process),
-	  m_error(error),
-	  m_socket(io.get_service())
-{
 }
 
 void connection::strand_write_callback(uint64_t id, uint64_t flags, message::raw_buffer_t buf, connection::process_fn_t complete)

@@ -16,6 +16,7 @@ namespace ioremap { namespace scatter {
 enum {
 	SCATTER_CMD_SERVER	= 0,
 	SCATTER_CMD_JOIN,
+	SCATTER_CMD_REMOTE_IDS,
 	SCATTER_CMD_CLIENT	= 1024,
 	__SCATTER_CMD_MAX
 };
