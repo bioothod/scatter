@@ -46,9 +46,9 @@ public:
 	void send(const message &msg, process_fn_t complete);
 	void send_reply(const message &msg);
 
-	const std::vector<cid_t> ids() const {
-		return m_cids;
-	}
+	const std::vector<cid_t> ids() const;
+	void set_ids(std::vector<cid_t> &cids);
+
 private:
 	io_service_pool &m_pool;
 	boost::asio::io_service::strand m_strand;

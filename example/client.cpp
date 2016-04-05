@@ -11,6 +11,7 @@ class simple_map {
 public:
 	simple_map(const std::string &s) {
 		m_node.reset(new scatter::node(s));
+		m_server = true;
 	}
 	simple_map() {
 		m_node.reset(new scatter::node());
@@ -18,7 +19,12 @@ public:
 
 	void connect(const std::string &s, uint64_t db) {
 		auto c = m_node->connect(s, std::bind(&simple_map::process, this, std::placeholders::_1, std::placeholders::_2));
-		m_node->join(db);
+
+		if (m_server) {
+			m_node->server_join(c);
+		} else {
+			m_node->bcast_join(db);
+		}
 	}
 
 	void send(const std::string &s, uint64_t db, scatter::connection::process_fn_t complete) {
@@ -36,6 +42,7 @@ public:
 
 private:
 	std::unique_ptr<scatter::node> m_node;
+	bool m_server = false;
 
 	void process(scatter::connection::pointer client, scatter::message &msg) {
 		LOG(INFO) << "connection: " << client->connection_string() <<

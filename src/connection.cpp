@@ -288,5 +288,14 @@ void connection::process_message()
 	}
 }
 
+const std::vector<connection::cid_t> connection::ids() const
+{
+	return m_cids;
+}
+void connection::set_ids(std::vector<connection::cid_t> &cids)
+{
+	m_cids.swap(cids);
+}
+
 }} // namespace ioremap::scatter
 

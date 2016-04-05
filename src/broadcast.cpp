@@ -62,7 +62,7 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 		LOG(INFO) << "broadcast: " << m_id <<
 			": broadcasting message: " << msg.to_string() <<
 			", connection: " << c->connection_string() <<
-			", completed: " << completed << "/" << copy.size();
+			", completed: " << var->completed << "/" << copy.size();
 
 			if (self && (c->socket().local_endpoint() == self->socket().local_endpoint()) &&
 					(c->socket().remote_endpoint() == self->socket().remote_endpoint())) {

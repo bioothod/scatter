@@ -13,6 +13,7 @@ node::node(const std::string &addr_str)
 	init(5);
 
 	generate_ids();
+	//m_route.add(m_cids, std::make_shared<connection>());
 
 	m_server.reset(new server(*m_io_pool, m_resolver->resolve(addr_str).get()->endpoint(),
 			[this] (const boost::system::error_code &ec, connection::proto::socket &&socket) {
@@ -54,56 +55,76 @@ connection::pointer node::connect(const std::string &addr, typename connection::
 	connection::pointer client = connection::create(*m_io_pool, process,
 			std::bind(&node::drop, this, std::placeholders::_1, std::placeholders::_2));
 
-	LOG(INFO) << "connecting to addr: " << addr << ", id: " << m_id;
-
 	client->connect(m_resolver->resolve(addr).get());
 	m_route.add(client);
 
-	LOG(INFO) << "connected to addr: " << addr << ", id: " << m_id;
 	return client;
 }
 
-void node::join(uint64_t db)
+void node::send_blocked_command(connection::pointer cn, uint64_t db, int cmd, const char *data, size_t size)
 {
-	message msg(0);
+	message msg(size);
 
+	if (data && size)
+		msg.append(data, size);
+
+	msg.hdr.size = size;
 	msg.hdr.id = m_id;
 	msg.hdr.db = db;
-	msg.hdr.cmd = SCATTER_CMD_JOIN;
+	msg.hdr.cmd = cmd;
 	msg.hdr.flags = SCATTER_FLAGS_NEED_ACK;
-
-	LOG(INFO) << "joining: " <<
-		": id: " << m_id <<
-		", db: " << db <<
-		std::endl;
-
 	msg.encode_header();
 
 	std::promise<int> p;
 	std::future<int> f = p.get_future();
 
-	auto cn = m_route.find(db);
-	if (!cn)
-		throw_error(-ENOENT, "node is not connected to anything which can handle database %ld", db);
-
 	cn->send(msg,
 		[&] (scatter::connection::pointer self, scatter::message &msg) {
 			if (msg.hdr.status) {
+				LOG(ERROR) << "connection: " << cn->connection_string() <<
+					", message: " << msg.to_string() <<
+					", error: could not send blocked command: " << cmd <<
+					", db: " << db <<
+					", error: " << msg.hdr.status;
+
 				p.set_exception(std::make_exception_ptr(create_error(msg.hdr.status,
-							"could not join database id: %ld, error: %d",
-							db, msg.hdr.status)));
+							"could not send blocked cmd: %d, database id: %ld, error: %d",
+							cmd, db, msg.hdr.status)));
 				return;
 			}
-
-			LOG(INFO) << "joined: " <<
-				": id: " << m_id <<
-				", db: " << db <<
-				std::endl;
 
 			p.set_value(db);
 		});
 
 	f.get();
+}
+
+void node::send_blocked_command(uint64_t db, int cmd, const char *data, size_t size)
+{
+	auto cn = m_route.find(db);
+	if (!cn) {
+		LOG(ERROR) << "send_blocked_command: db: " << db <<
+			", command: " << cmd <<
+			", error: node is not connected to anything which can handle this database";
+
+		throw_error(-ENOENT, "node is not connected to anything which can handle database %ld", db);
+	}
+
+	send_blocked_command(cn, db, cmd, data, size);
+}
+
+void node::bcast_join(uint64_t db)
+{
+	send_blocked_command(db, SCATTER_CMD_BCAST_JOIN, NULL, 0);
+}
+
+void node::server_join(connection::pointer srv)
+{
+	std::stringstream buffer;
+	msgpack::pack(buffer, m_cids);
+
+	std::string buf(buffer.str());
+	send_blocked_command(srv, 0, SCATTER_CMD_SERVER_JOIN, buf.data(), buf.size());
 }
 
 void node::drop(connection::pointer cn, const boost::system::error_code &ec)
@@ -132,7 +153,9 @@ void node::send(message &msg, connection::process_fn_t complete)
 		LOG(ERROR) << "send: message: " << msg.to_string() <<
 			", error: node is not connected to anything which can handle database " << db;
 
-		throw_error(-ENOENT, "node is not connected to anything which can handle database %ld", db);
+		msg.hdr.status = -ENOENT;
+		complete(cn, msg);
+		return;
 	}
 
 	cn->send(msg, complete);
@@ -146,7 +169,7 @@ void node::init(int io_pool_size)
 	m_resolver.reset(new resolver<>(*m_io_pool));
 }
 
-void node::forward_message(connection::pointer client, message &msg)
+void node::broadcast_client_message(connection::pointer client, message &msg)
 {
 	std::unique_lock<std::mutex> guard(m_lock);
 	auto it = m_bcast.find(msg.db());
@@ -157,12 +180,12 @@ void node::forward_message(connection::pointer client, message &msg)
 	}
 
 	auto sptr = msg.raw_buffer();
-	LOG(INFO) << "forward: db: " << msg.db() <<
+	LOG(INFO) << "broadcast_client_message: connection: " << client->connection_string() <<
 		", message: " << msg.to_string();
+
 	it->second.send(client, msg, [this, sptr] (connection::pointer self, message &reply) {
-				LOG(INFO) << "forward: connection: " << self->connection_string() <<
-					", db: " << reply.db() <<
-					", reply: " << reply.to_string();
+				LOG(INFO) << "broadcast_client_message: connection: " << self->connection_string() <<
+					", completed with reply: " << reply.to_string();
 
 				self->send_reply(reply);
 			});
@@ -183,12 +206,12 @@ void node::message_handler(connection::pointer client, message &msg)
 	LOG(INFO) << "server received message: " << msg.to_string();
 
 	if (msg.hdr.cmd >= SCATTER_CMD_CLIENT) {
-		forward_message(client, msg);
+		broadcast_client_message(client, msg);
 		return;
 	}
 
 	switch (msg.hdr.cmd) {
-	case SCATTER_CMD_JOIN: {
+	case SCATTER_CMD_BCAST_JOIN: {
 		std::unique_lock<std::mutex> guard(m_lock);
 
 		auto it = m_connected.find(client->socket().remote_endpoint());
@@ -206,11 +229,21 @@ void node::message_handler(connection::pointer client, message &msg)
 		msg.hdr.status = 0;
 		break;
 	}
+	case SCATTER_CMD_BCAST_LEAVE: {
+		std::unique_lock<std::mutex> guard(m_lock);
+
+		for (auto &group: m_bcast) {
+			group.second.leave(client);
+		}
+
+		msg.hdr.status = 0;
+		break;
+	}
 	case SCATTER_CMD_REMOTE_IDS: {
 		std::stringstream buffer;
 		msgpack::pack(buffer, m_cids);
 
-		std::string rdata = buffer.str();
+		std::string rdata(buffer.str());
 
 		message reply(rdata.size());
 		reply.append(rdata.data(), rdata.size());
@@ -226,6 +259,31 @@ void node::message_handler(connection::pointer client, message &msg)
 
 		// server has sent reply, no need to send another one
 		msg.hdr.flags &= ~SCATTER_FLAGS_NEED_ACK;
+		break;
+	}
+	case SCATTER_CMD_SERVER_JOIN: {
+		try {
+			msgpack::unpacked up;
+			msgpack::unpack(&up, msg.data(), msg.hdr.size);
+
+			std::vector<connection::cid_t> cids;
+			up.get().convert(&cids);
+
+			client->set_ids(cids);
+			m_route.add(client);
+		} catch (const std::exception &e) {
+			LOG(ERROR) << "connection: " << client->connection_string() <<
+				", message: " << msg.to_string() <<
+				", error: could not unpack ids: " << e.what();
+
+			msg.hdr.status = -EINVAL;
+			return;
+		}
+		msg.hdr.status = 0;
+	}
+	case SCATTER_CMD_SERVER_LEAVE: {
+		m_route.remove(client);
+		msg.hdr.status = 0;
 		break;
 	}
 	default:

@@ -24,7 +24,10 @@ std::string header::cmd_string() const
 	if (cmd >= 0 && cmd < __SCATTER_CMD_MAX) {
 		static std::map<int, std::string> command_strings = {
 			{ SCATTER_CMD_SERVER, "[server]" },
-			{ SCATTER_CMD_JOIN, "[join]" },
+			{ SCATTER_CMD_SERVER_JOIN, "[server_join]" },
+			{ SCATTER_CMD_SERVER_LEAVE, "[server_leave]" },
+			{ SCATTER_CMD_BCAST_JOIN, "[bcast_join]" },
+			{ SCATTER_CMD_BCAST_LEAVE, "[bcast_leave]" },
 			{ SCATTER_CMD_REMOTE_IDS, "[remote_ids]" },
 			{ SCATTER_CMD_CLIENT, "[client]" },
 		};

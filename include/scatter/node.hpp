@@ -14,7 +14,8 @@ public:
 
 	connection::pointer connect(const std::string &addr, typename connection::process_fn_t process);
 
-	void join(uint64_t db_id);
+	void server_join(connection::pointer srv);
+	void bcast_join(uint64_t db);
 
 	// message should be encoded
 	void send(message &msg, connection::process_fn_t complete);
@@ -40,13 +41,16 @@ private:
 
 	// these are part of the server node
 	std::map<connection::proto::endpoint, connection::pointer> m_connected;
-	void forward_message(connection::pointer client, message &msg);
+	void broadcast_client_message(connection::pointer client, message &msg);
 
 	// message has been already decoded
 	// processing function should not send ack itself,
 	// if it does send ack, it has to clear SCATTER_FLAGS_NEED_ACK bit in msg.flags,
 	// otherwise connection's code will send another ack
 	void message_handler(connection::pointer client, message &msg);
+
+	void send_blocked_command(connection::pointer cn, uint64_t db, int cmd, const char *data, size_t size);
+	void send_blocked_command(uint64_t db, int cmd, const char *data, size_t size);
 };
 
 }} // namespace ioremap::scatter
