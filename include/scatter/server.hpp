@@ -12,6 +12,8 @@ public:
 
 	server(io_service_pool& io_pool, const boost::asio::ip::tcp::endpoint &ep, accept_fn_t accept);
 
+	connection::proto::socket &socket();
+
 	void schedule_accept();
 private:
 

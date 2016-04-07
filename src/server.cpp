@@ -19,4 +19,9 @@ void server::schedule_accept()
 			});
 }
 
+connection::proto::socket& server::socket()
+{
+	return m_socket;
+}
+
 }} // namespace ioremap::scatter
