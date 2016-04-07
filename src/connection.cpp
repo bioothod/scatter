@@ -11,8 +11,7 @@ connection::connection(io_service_pool &io, connection::process_fn_t process, er
 	  m_error(error),
 	  m_socket(std::move(socket))
 {
-	m_local_string = m_socket.local_endpoint().address().to_string() + ":" + std::to_string(m_socket.local_endpoint().port());
-	m_remote_string = m_socket.remote_endpoint().address().to_string() + ":" + std::to_string(m_socket.remote_endpoint().port());
+	set_connection_strings();
 }
 connection::connection(io_service_pool &io, connection::process_fn_t process, error_fn_t error)
 	: m_pool(io),
@@ -21,6 +20,11 @@ connection::connection(io_service_pool &io, connection::process_fn_t process, er
 	  m_error(error),
 	  m_socket(io.get_service())
 {
+}
+
+connection::~connection()
+{
+	LOG(INFO) << "connection: " << connection_string() << ": going down";
 }
 
 
@@ -32,6 +36,14 @@ connection::proto::socket& connection::socket()
 std::string connection::connection_string() const
 {
 	return "r:" + m_remote_string + "/l:" + m_local_string;
+}
+std::string connection::remote_string() const
+{
+	return m_remote_string;
+}
+std::string connection::local_string() const
+{
+	return m_local_string;
 }
 
 void connection::close()
@@ -66,10 +78,7 @@ void connection::connect(const connection::resolver_iterator it)
 					return;
 				}
 
-				m_local_string = m_socket.local_endpoint().address().to_string() + ":" +
-					std::to_string(m_socket.local_endpoint().port());
-				m_remote_string = m_socket.remote_endpoint().address().to_string() + ":" +
-					std::to_string(m_socket.remote_endpoint().port());
+				set_connection_strings();
 				p.set_value(0);
 
 				read_header();
@@ -295,6 +304,15 @@ const std::vector<connection::cid_t> connection::ids() const
 void connection::set_ids(std::vector<connection::cid_t> &cids)
 {
 	m_cids.swap(cids);
+}
+
+void connection::set_connection_strings()
+{
+	auto fam = m_socket.local_endpoint().address().is_v4() ? "2" : "10";
+	m_local_string = m_socket.local_endpoint().address().to_string() + ":" +
+			std::to_string(m_socket.local_endpoint().port()) + ":" + fam;
+	m_remote_string = m_socket.remote_endpoint().address().to_string() + ":" +
+			std::to_string(m_socket.remote_endpoint().port()) + ":" + fam;
 }
 
 }} // namespace ioremap::scatter

@@ -36,6 +36,8 @@ public:
 
 	proto::socket& socket();
 	std::string connection_string() const;
+	std::string remote_string() const;
+	std::string local_string() const;
 
 	void close();
 	void start_reading();
@@ -49,6 +51,7 @@ public:
 	const std::vector<cid_t> ids() const;
 	void set_ids(std::vector<cid_t> &cids);
 
+	~connection();
 private:
 	io_service_pool &m_pool;
 	boost::asio::io_service::strand m_strand;
@@ -88,6 +91,8 @@ private:
 	// called from @connect() method to obtain ids of the remote node
 	void request_remote_ids();
 	void parse_remote_ids(std::promise<int> &p, message &msg);
+
+	void set_connection_strings();
 };
 
 }} // namespace ioremap::scatter
