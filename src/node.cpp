@@ -32,14 +32,18 @@ node::node(const std::string &addr_str)
 					guard.unlock();
 
 					client->start_reading();
+				} else {
+					LOG(ERROR) << "server: error: " << ec.message();
 				}
 
 				// reschedule acceptor
-				m_server->schedule_accept();
+				if (m_server)
+					m_server->schedule_accept();
 			}));
 }
 node::~node()
 {
+	LOG(INFO) << "node " << m_id << " is going down";
 }
 
 void node::generate_ids()
@@ -167,6 +171,7 @@ void node::init(int io_pool_size)
 
 	m_io_pool.reset(new io_service_pool(io_pool_size));
 	m_resolver.reset(new resolver<>(*m_io_pool));
+	LOG(INFO) << "node " << m_id << " has been created";
 }
 
 void node::broadcast_client_message(connection::pointer client, message &msg)
@@ -289,6 +294,20 @@ void node::message_handler(connection::pointer client, message &msg)
 	default:
 		break;
 	}
+}
+
+connection::pointer node::get_connection(uint64_t db)
+{
+	return m_route.find(db);
+}
+
+void node::test_set_ids(const std::vector<connection::cid_t> &cids)
+{
+	m_cids = cids;
+}
+std::vector<connection::cid_t> node::test_ids() const
+{
+	return m_cids;
 }
 
 }} // namespace ioremap::scatter

@@ -12,13 +12,22 @@ public:
 	node(const std::string &addr_str);
 	~node();
 
+	// this node connects to remote address @addr and adds given connection into local route table
 	connection::pointer connect(const std::string &addr, typename connection::process_fn_t process);
 
 	void server_join(connection::pointer srv);
 	void bcast_join(uint64_t db);
 
+	connection::pointer get_connection(uint64_t db);
+
 	// message should be encoded
 	void send(message &msg, connection::process_fn_t complete);
+
+	// this should only be used by testing system to simulate node initialization
+	// these test methods are not thread-safe and should be called when it is guaranteed
+	// that route info hasn't been sent to remote nodes yet
+	void test_set_ids(const std::vector<connection::cid_t> &cids);
+	std::vector<connection::cid_t> test_ids() const;
 
 private:
 	uint64_t m_id;
