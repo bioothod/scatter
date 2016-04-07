@@ -17,6 +17,7 @@ include(cmake/locate_library.cmake)
 
 LOCATE_LIBRARY(MSGPACK "msgpack.hpp" "msgpack")
 LOCATE_LIBRARY(GLOG "glog/logging.h" "glog")
+LOCATE_LIBRARY(GTEST "gtest/gtest.h" "gtest")
 
 find_package(Boost COMPONENTS system thread program_options REQUIRED)
 #find_package(Elliptics REQUIRED)
@@ -36,15 +37,18 @@ find_package(Threads REQUIRED)
 include_directories(
 	"${CMAKE_CURRENT_SOURCE_DIR}/include"
 	${GLOG_INCLUDE_DIRS}
+	${GTEST_INCLUDE_DIRS}
 	${MSGPACK_INCLUDE_DIRS}
 )
 
 link_directories(
 	${GLOG_LIBRARY_DIRS}
+	${GTEST_LIBRARY_DIRS}
 	${MSGPACK_LIBRARY_DIRS}
 )
 
 add_subdirectory(src)
+add_subdirectory(test)
 add_subdirectory(example)
 
 file(GLOB headers "${CMAKE_CURRENT_SOURCE_DIR}/include/scatter/*.hpp")
