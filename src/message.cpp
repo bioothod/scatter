@@ -82,6 +82,14 @@ message::message(const message &other) : m_buffer(other.m_buffer)
 	m_data_offset = other.m_data_offset;
 }
 
+void message::swap(message &other)
+{
+	std::swap(m_buffer, other.m_buffer);
+	std::swap(hdr, other.hdr);
+	std::swap(m_cpu, other.m_cpu);
+	std::swap(m_data_offset, other.m_data_offset);
+}
+
 
 bool message::decode_header()
 {
