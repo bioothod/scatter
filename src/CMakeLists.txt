@@ -9,10 +9,12 @@ add_library(scatter SHARED
 	server.cpp
 )
 target_link_libraries(scatter
+	${Boost_LIBRARIES}
 	${FOLLY_LIBRARIES}
+	${GLOG_LIBRARIES}
 	${WANGLE_LIBRARIES}
 	${MSGPACK_LIBRARIES}
 )
 
-#add_executable(scatter_node node.cpp)
-#target_link_libraries(scatter_node scatter)
+add_executable(scatter_server server_main.cpp)
+target_link_libraries(scatter_server scatter)
