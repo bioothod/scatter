@@ -163,6 +163,43 @@ void connection::send_reply(const message &msg)
 			});
 }
 
+void connection::send_blocked_command(uint64_t id, uint64_t db, int cmd, const char *data, size_t size)
+{
+	message msg(size);
+
+	if (data && size)
+		msg.append(data, size);
+
+	msg.hdr.size = size;
+	msg.hdr.id = id;
+	msg.hdr.db = db;
+	msg.hdr.cmd = cmd;
+	msg.hdr.flags = SCATTER_FLAGS_NEED_ACK;
+	msg.encode_header();
+
+	std::promise<int> p;
+	std::future<int> f = p.get_future();
+
+	send(msg,
+		[&] (scatter::connection::pointer self, scatter::message &msg) {
+			if (msg.hdr.status) {
+				LOG(ERROR) << "connection: " << self->connection_string() <<
+					", message: " << msg.to_string() <<
+					", error: could not send blocked command: " << msg.hdr.status;
+
+				p.set_exception(std::make_exception_ptr(create_error(msg.hdr.status,
+							"could not send blocked message: %s, error: %d",
+							msg.to_string().c_str(), msg.hdr.status)));
+				return;
+			}
+
+			p.set_value(db);
+		});
+
+	f.get();
+}
+
+
 void connection::strand_write_callback(uint64_t id, uint64_t flags, message::raw_buffer_t buf, connection::process_fn_t complete)
 {
 	connection::completion_t cmpl{ id, flags, buf, complete };
@@ -199,20 +236,24 @@ void connection::write_completed(const boost::system::error_code &error, size_t 
 	(void) bytes_transferred;
 
 	std::unique_lock<std::mutex> guard(m_lock);
+	auto out = m_outgoing.front();
+	LOG(INFO) << "connection: " << connection_string() <<
+		", id: " << out.id <<
+		", write completed";
 	m_outgoing.pop_front();
 
 	if (!error && !m_outgoing.empty()) {
-		uint64_t id = m_outgoing[0].id;
+		uint64_t id = m_outgoing.front().id;
 
 		auto p = m_sent.find(id);
 		if (p == m_sent.end()) {
 			return;
 		}
 
-		auto &c = p->second;
+		message::raw_buffer_t buf = p->second.buf;
 		guard.unlock();
 
-		write_next_buf(c.buf);
+		write_next_buf(buf);
 	}
 }
 
@@ -273,7 +314,7 @@ void connection::process_message()
 		std::unique_lock<std::mutex> guard(m_lock);
 		auto p = m_sent.find(id);
 		if (p == m_sent.end()) {
-			LOG(ERROR) << "connection: " << m_remote_string << "->" << m_local_string <<
+			LOG(ERROR) << "connection: " << connection_string() <<
 				", message: " << m_message.to_string() <<
 				", error: there is no handler for reply";
 
@@ -291,9 +332,12 @@ void connection::process_message()
 		return;
 	}
 
-	m_process(shared_from_this(), m_message);
-	if (m_message.hdr.flags & SCATTER_FLAGS_NEED_ACK) {
-		send_reply(m_message);
+	message m;
+	m.swap(m_message);
+
+	m_process(shared_from_this(), m);
+	if (m.hdr.flags & SCATTER_FLAGS_NEED_ACK) {
+		send_reply(m);
 	}
 }
 
