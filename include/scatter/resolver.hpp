@@ -8,6 +8,8 @@
 
 #include <iostream>
 
+#include <glog/logging.h>
+
 namespace ioremap { namespace scatter {
 
 template <typename ProtoType = boost::asio::ip::tcp>
@@ -52,7 +54,7 @@ public:
 	}
 
 	std::future<IterType> resolve(const std::string &addr_str, const std::string &port_str, int family = AF_INET) {
-		std::cout << "trying to resolve addr: " << addr_str << ", port: " << port_str << ", family: " << family << std::endl;
+		VLOG(1) << "trying to resolve addr: " << addr_str << ", port: " << port_str << ", family: " << family << std::endl;
 
 		auto proto = family == AF_INET6 ? ProtoType::v6() : ProtoType::v4();
 		boost::system::error_code ec;

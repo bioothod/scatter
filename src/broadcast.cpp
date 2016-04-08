@@ -17,7 +17,7 @@ void broadcast::join(connection::pointer client)
 	std::lock_guard<std::mutex> m_guard(m_lock);
 	m_clients.insert(client);
 
-	LOG(INFO) << "broadcast: " << m_id <<
+	VLOG(2) << "broadcast: " << m_id <<
 			", connection: " << client->connection_string() <<
 			", command: join";
 }
@@ -27,7 +27,7 @@ void broadcast::leave(connection::pointer client)
 	std::lock_guard<std::mutex> m_guard(m_lock);
 	m_clients.erase(client);
 
-	LOG(INFO) << "broadcast: " << m_id <<
+	VLOG(2) << "broadcast: " << m_id <<
 			", connection: " << client->connection_string() <<
 			", command: leave";
 }
@@ -59,7 +59,7 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 	auto var(std::make_shared<tmp>(copy.size(), err, complete));
 
 	for (auto &c : copy) {
-		LOG(INFO) << "connection: " << self->connection_string() <<
+		VLOG(1) << "connection: " << self->connection_string() <<
 			", broadcast connection: " << c->connection_string() <<
 			": message: " << msg.to_string() <<
 			", completed: " << var->completed << "/" << copy.size();
@@ -68,7 +68,7 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 					(c->socket().remote_endpoint() == self->socket().remote_endpoint())) {
 				var->completed--;
 
-				LOG(INFO) << "connection: " << self->connection_string() <<
+				VLOG(2) << "connection: " << self->connection_string() <<
 					": message: " << msg.to_string() <<
 					", completed: " << var->completed;
 
@@ -90,7 +90,7 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 
 						var->completed--;
 
-						LOG(INFO) << "connection: " << self->connection_string() <<
+						VLOG(2) << "connection: " << self->connection_string() <<
 							", broadcast connection: " << fwd->connection_string() <<
 							", reply: " << reply.to_string() << ", completed: " << var->completed;
 

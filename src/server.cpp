@@ -66,7 +66,6 @@ void server::drop(connection::pointer cn, const boost::system::error_code &ec)
 {
 	(void) ec;
 
-	LOG(ERROR) << "connection: " << cn->connection_string() << ", use-count: " << cn.use_count();
 	m_route.remove(cn);
 
 	std::unique_lock<std::mutex> guard(m_lock);
@@ -74,7 +73,6 @@ void server::drop(connection::pointer cn, const boost::system::error_code &ec)
 	for (auto &p : m_bcast) {
 		broadcast &bcast = p.second;
 
-		LOG(ERROR) << "connection: " << cn->connection_string() << ", use-count: " << cn.use_count();
 		bcast.leave(cn);
 	}
 }
@@ -114,11 +112,11 @@ void server::broadcast_client_message(connection::pointer client, message &msg)
 	}
 
 	auto sptr = msg.raw_buffer();
-	LOG(INFO) << "broadcast_client_message: connection: " << client->connection_string() <<
+	VLOG(1) << "broadcast_client_message: connection: " << client->connection_string() <<
 		", message: " << msg.to_string();
 
 	it->second.send(client, msg, [this, sptr] (connection::pointer self, message &reply) {
-				LOG(INFO) << "broadcast_client_message: connection: " << self->connection_string() <<
+				VLOG(1) << "broadcast_client_message: connection: " << self->connection_string() <<
 					", completed with reply: " << reply.to_string();
 
 				self->send_reply(reply);
@@ -137,7 +135,7 @@ void server::broadcast_client_message(connection::pointer client, message &msg)
 // otherwise connection's code will send another ack
 void server::message_handler(connection::pointer client, message &msg)
 {
-	LOG(INFO) << "connection: " << client->connection_string() << ", server received message: " << msg.to_string();
+	VLOG(1) << "connection: " << client->connection_string() << ", server received message: " << msg.to_string();
 
 	if (msg.hdr.cmd >= SCATTER_CMD_CLIENT) {
 		broadcast_client_message(client, msg);

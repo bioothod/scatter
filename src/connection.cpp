@@ -24,7 +24,7 @@ connection::connection(io_service_pool &io, connection::process_fn_t process, er
 
 connection::~connection()
 {
-	LOG(INFO) << "connection: " << connection_string() << ": going down";
+	VLOG(2) << "connection: " << connection_string() << ": going down";
 }
 
 
@@ -130,7 +130,7 @@ void connection::parse_remote_ids(std::promise<int> &p, message &msg)
 		return;
 	}
 
-	LOG(INFO) << "connection: " << connection_string() << ", received " << m_cids.size() << " remote ids";
+	VLOG(1) << "connection: " << connection_string() << ", received " << m_cids.size() << " remote ids";
 	p.set_value(0);
 }
 
@@ -141,7 +141,7 @@ void connection::send(const message &msg, connection::process_fn_t complete)
 	uint64_t id = msg.id();
 	uint64_t flags = msg.flags();
 
-	LOG(INFO) << "connection: " << connection_string() << ", sending data: " << msg.to_string();
+	VLOG(2) << "connection: " << connection_string() << ", sending data: " << msg.to_string();
 
 	m_strand.post(std::bind(&connection::strand_write_callback, this, id, flags, buf, complete));
 }
@@ -157,7 +157,7 @@ void connection::send_reply(const message &msg)
 	reply->hdr.flags |= SCATTER_FLAGS_REPLY;
 	reply->encode_header();
 
-	LOG(INFO) << "connection: " << connection_string() << ", sending reply back: " << reply->to_string();
+	VLOG(2) << "connection: " << connection_string() << ", sending reply back: " << reply->to_string();
 
 	send(*reply, [this, self, reply] (pointer, message &) {
 			});
@@ -211,7 +211,7 @@ void connection::strand_write_callback(uint64_t id, uint64_t flags, message::raw
 	if (flags & SCATTER_FLAGS_NEED_ACK) {
 		m_sent[id] = cmpl;
 
-		LOG(INFO) << "connection: " << connection_string() <<
+		VLOG(2) << "connection: " << connection_string() <<
 			", id: " << id <<
 			", added completion callback";
 	}
@@ -237,9 +237,11 @@ void connection::write_completed(const boost::system::error_code &error, size_t 
 
 	std::unique_lock<std::mutex> guard(m_lock);
 	auto out = m_outgoing.front();
-	LOG(INFO) << "connection: " << connection_string() <<
+
+	VLOG(2) << "connection: " << connection_string() <<
 		", id: " << out.id <<
 		", write completed";
+
 	m_outgoing.pop_front();
 
 	if (!error && !m_outgoing.empty()) {
@@ -299,7 +301,7 @@ void connection::read_data()
 				// which will have to be moved to that pool
 				// and new pointer must be created to read next message into
 
-				LOG(INFO) << "connection: " << connection_string() << ", read message: " << m_message.to_string();
+				VLOG(1) << "connection: " << connection_string() << ", read message: " << m_message.to_string();
 
 				process_message();
 				read_header();
@@ -325,7 +327,7 @@ void connection::process_message()
 		m_sent.erase(id);
 		guard.unlock();
 
-		LOG(INFO) << "connection: " << connection_string() <<
+		VLOG(2) << "connection: " << connection_string() <<
 			", id: " << id <<
 			", removed completion callback";
 		c.complete(shared_from_this(), m_message);
