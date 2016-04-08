@@ -245,14 +245,7 @@ void connection::write_completed(const boost::system::error_code &error, size_t 
 	m_outgoing.pop_front();
 
 	if (!error && !m_outgoing.empty()) {
-		uint64_t id = m_outgoing.front().id;
-
-		auto p = m_sent.find(id);
-		if (p == m_sent.end()) {
-			return;
-		}
-
-		message::raw_buffer_t buf = p->second.buf;
+		message::raw_buffer_t buf = m_outgoing.front().buf;
 		guard.unlock();
 
 		write_next_buf(buf);
@@ -310,14 +303,17 @@ void connection::read_data()
 
 void connection::process_message()
 {
-	if (m_message.hdr.flags & SCATTER_FLAGS_REPLY) {
-		uint64_t id = m_message.id();
+	message m;
+	m.swap(m_message);
+
+	if (m.hdr.flags & SCATTER_FLAGS_REPLY) {
+		uint64_t id = m.id();
 
 		std::unique_lock<std::mutex> guard(m_lock);
 		auto p = m_sent.find(id);
 		if (p == m_sent.end()) {
 			LOG(ERROR) << "connection: " << connection_string() <<
-				", message: " << m_message.to_string() <<
+				", message: " << m.to_string() <<
 				", error: there is no handler for reply";
 
 			return;
@@ -330,12 +326,9 @@ void connection::process_message()
 		VLOG(2) << "connection: " << connection_string() <<
 			", id: " << id <<
 			", removed completion callback";
-		c.complete(shared_from_this(), m_message);
+		c.complete(shared_from_this(), m);
 		return;
 	}
-
-	message m;
-	m.swap(m_message);
 
 	m_process(shared_from_this(), m);
 	if (m.hdr.flags & SCATTER_FLAGS_NEED_ACK) {
