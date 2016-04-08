@@ -22,6 +22,8 @@ public:
 	io_service_pool(int num);
 	~io_service_pool();
 
+	void stop();
+
 	boost::asio::io_service &get_service();
 
 	void queue_task(std::function<void ()> fn);
