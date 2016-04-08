@@ -77,7 +77,7 @@ TEST_F(stest, bcast)
 	uint64_t db = 123;
 
 	std::mutex lock;
-	std::condition_variable cv1;
+	std::condition_variable cv1, cv2;
 
 	std::atomic_int c1_counter(0), c1_completed(0);
 	c1.connect(m_addr1, [&] (connection::pointer, message &) {
@@ -91,17 +91,34 @@ TEST_F(stest, bcast)
 			});
 	c2.bcast_join(db);
 
+	int c1_bias = 100;
+	int c2_bias = 300;
+
 	int n = 100;
 	for (int i = 0; i < n; ++i) {
 		message msg;
-		msg.hdr.id = 100 + i;
+		msg.hdr.id = c1_bias + i;
 		msg.hdr.db = db;
 		msg.hdr.cmd = SCATTER_CMD_CLIENT + 1;
 		msg.hdr.flags = SCATTER_FLAGS_NEED_ACK;
 		msg.encode_header();
-		c1.send(msg, [&] (connection::pointer, message &) {
+
+		c1.send(msg, [&] (connection::pointer, message &reply) {
+					ASSERT_EQ(reply.id(), c1_bias + c1_completed.load());
 					c1_completed++;
 					cv1.notify_one();
+				});
+
+		message m2;
+		m2.hdr.id = c2_bias + i;
+		m2.hdr.db = db;
+		m2.hdr.cmd = SCATTER_CMD_CLIENT + 1;
+		m2.hdr.flags = SCATTER_FLAGS_NEED_ACK;
+		m2.encode_header();
+		c2.send(m2, [&] (connection::pointer, message &reply) {
+					ASSERT_EQ(reply.id(), c2_bias + c2_completed.load());
+					c2_completed++;
+					cv2.notify_one();
 				});
 	}
 
@@ -111,6 +128,13 @@ TEST_F(stest, bcast)
 
 	ASSERT_EQ(c1_completed, n);
 	ASSERT_EQ(c1_completed, c2_counter);
+
+	std::unique_lock<std::mutex> l2(lock);
+	cv2.wait(l2, [&] {return c2_completed == n;});
+	l2.unlock();
+
+	ASSERT_EQ(c2_completed, n);
+	ASSERT_EQ(c2_completed, c1_counter);
 
 	return;
 }
