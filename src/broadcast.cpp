@@ -8,7 +8,7 @@ broadcast::broadcast(uint64_t id) : m_id(id)
 
 broadcast::broadcast(broadcast &&other)
 	: m_id(other.m_id)
-	, m_clients(other.m_clients)
+	, m_clients(std::move(other.m_clients))
 {
 }
 
@@ -59,16 +59,17 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 	auto var(std::make_shared<tmp>(copy.size(), err, complete));
 
 	for (auto &c : copy) {
-		LOG(INFO) << "broadcast: " << m_id <<
-			": broadcasting message: " << msg.to_string() <<
-			", connection: " << c->connection_string() <<
+		LOG(INFO) << "connection: " << self->connection_string() <<
+			", broadcast connection: " << c->connection_string() <<
+			": message: " << msg.to_string() <<
 			", completed: " << var->completed << "/" << copy.size();
 
 			if (self && (c->socket().local_endpoint() == self->socket().local_endpoint()) &&
 					(c->socket().remote_endpoint() == self->socket().remote_endpoint())) {
 				var->completed--;
 
-				LOG(INFO) << "connection: " << c->connection_string() <<
+				LOG(INFO) << "connection: " << self->connection_string() <<
+					": message: " << msg.to_string() <<
 					", completed: " << var->completed;
 
 				if (var->completed == 0) {
@@ -79,7 +80,7 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 				continue;
 			}
 
-			c->send(msg, [this, self, &msg, var] (connection::pointer fwd, message &reply) mutable {
+			c->send(msg, [this, self, var] (connection::pointer fwd, message &reply) {
 						if (reply.hdr.status) {
 							leave(fwd);
 						} else {
@@ -89,7 +90,8 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 
 						var->completed--;
 
-						LOG(INFO) << "connection: " << fwd->connection_string() <<
+						LOG(INFO) << "connection: " << self->connection_string() <<
+							", broadcast connection: " << fwd->connection_string() <<
 							", reply: " << reply.to_string() << ", completed: " << var->completed;
 
 						if (var->completed == 0) {
