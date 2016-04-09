@@ -63,8 +63,6 @@ public:
 	message(std::shared_ptr<std::vector<char>> raw_buffer);
 	message(const message &other);
 
-	void swap(message &other);
-
 	bool decode_header();
 	bool encode_header();
 
