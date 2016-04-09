@@ -62,7 +62,7 @@ private:
 	proto::socket m_socket;
 	std::string m_local_string;
 	std::string m_remote_string;
-	message m_message;
+	header m_tmp_hdr;
 
 	typedef struct {
 		uint64_t		id;
@@ -70,10 +70,11 @@ private:
 		message::raw_buffer_t	buf;
 		process_fn_t		complete;
 	} completion_t;
+	typedef std::shared_ptr<completion_t> shared_completion_t;
 
 	std::mutex m_lock;
-	std::unordered_map<uint64_t, completion_t> m_sent;
-	std::deque<completion_t> m_outgoing;
+	std::unordered_map<uint64_t, shared_completion_t> m_sent;
+	std::deque<shared_completion_t> m_outgoing;
 
 	// we have connected to remote node, these are ids for that remote node
 	std::vector<cid_t> m_cids;
@@ -86,8 +87,8 @@ private:
 	void write_completed(const boost::system::error_code &error, size_t bytes_transferred);
 
 	void read_header();
-	void read_data();
-	void process_message();
+	void read_data(std::shared_ptr<message> msg);
+	void process_message(std::shared_ptr<message> msg);
 
 	// called from @connect() method to obtain ids of the remote node
 	void request_remote_ids();

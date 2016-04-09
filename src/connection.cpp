@@ -202,14 +202,18 @@ void connection::send_blocked_command(uint64_t id, uint64_t db, int cmd, const c
 
 void connection::strand_write_callback(uint64_t id, uint64_t flags, message::raw_buffer_t buf, connection::process_fn_t complete)
 {
-	connection::completion_t cmpl{ id, flags, buf, complete };
+	std::shared_ptr<connection::completion_t> c = std::make_shared<connection::completion_t>();
+	c->id = id;
+	c->flags = flags;
+	c->buf = buf;
+	c->complete = complete;
 
 	std::unique_lock<std::mutex> guard(m_lock);
-	m_outgoing.push_back(cmpl);
+	m_outgoing.push_back(c);
 
 	// only put request messages which require acknowledge into the map
 	if (flags & SCATTER_FLAGS_NEED_ACK) {
-		m_sent[id] = cmpl;
+		m_sent[id] = c;
 
 		VLOG(2) << "connection: " << connection_string() <<
 			", id: " << id <<
@@ -239,13 +243,13 @@ void connection::write_completed(const boost::system::error_code &error, size_t 
 	auto out = m_outgoing.front();
 
 	VLOG(2) << "connection: " << connection_string() <<
-		", id: " << out.id <<
+		", id: " << out->id <<
 		", write completed";
 
 	m_outgoing.pop_front();
 
 	if (!error && !m_outgoing.empty()) {
-		message::raw_buffer_t buf = m_outgoing.front().buf;
+		message::raw_buffer_t buf = m_outgoing.front()->buf;
 		guard.unlock();
 
 		write_next_buf(buf);
@@ -257,27 +261,33 @@ void connection::read_header()
 	auto self(shared_from_this());
 
 	boost::asio::async_read(m_socket,
-		boost::asio::buffer(m_message.buffer(), message::header_size),
+		boost::asio::buffer(&m_tmp_hdr, message::header_size),
 			[this, self] (boost::system::error_code ec, std::size_t /*size*/) {
-				if (ec || !m_message.decode_header()) {
+				if (ec) {
 					LOG(ERROR) << "connection: " << connection_string() << ", error: " << ec.message();
 					// reset connection, drop it from database
 					m_error(shared_from_this(), ec);
 					return;
 				}
 
-				read_data();
+
+				m_tmp_hdr.convert();
+
+				auto msg = std::make_shared<message>(m_tmp_hdr.size);
+				msg->hdr = m_tmp_hdr;
+				memcpy(msg->buffer(), &m_tmp_hdr, message::header_size);
+
+				read_data(msg);
 			});
 }
 
-void connection::read_data()
+void connection::read_data(std::shared_ptr<message> msg)
 {
 	auto self(shared_from_this());
 
-	m_message.resize(m_message.hdr.size);
 	boost::asio::async_read(m_socket,
-		boost::asio::buffer(m_message.data(), m_message.hdr.size),
-			[this, self] (boost::system::error_code ec, std::size_t /*size*/) {
+		boost::asio::buffer(msg->data(), msg->hdr.size),
+			[this, self, msg] (boost::system::error_code ec, std::size_t /*size*/) {
 				if (ec) {
 					LOG(ERROR) << "connection: " << connection_string() << ", error: " << ec.message();
 
@@ -289,50 +299,43 @@ void connection::read_data()
 				// we have whole message, reschedule read
 				// schedule message processing into separate thread pool
 				// or process it locally (here)
-				//
-				// if seprate pool is used, @m_message must be a pointer
-				// which will have to be moved to that pool
-				// and new pointer must be created to read next message into
 
-				VLOG(1) << "connection: " << connection_string() << ", read message: " << m_message.to_string();
+				VLOG(1) << "connection: " << connection_string() << ", read message: " << msg->to_string();
 
-				process_message();
+				process_message(msg);
 				read_header();
 			});
 }
 
-void connection::process_message()
+void connection::process_message(std::shared_ptr<message> msg)
 {
-	message m;
-	m.swap(m_message);
-
-	if (m.hdr.flags & SCATTER_FLAGS_REPLY) {
-		uint64_t id = m.id();
+	if (msg->hdr.flags & SCATTER_FLAGS_REPLY) {
+		uint64_t id = msg->id();
 
 		std::unique_lock<std::mutex> guard(m_lock);
 		auto p = m_sent.find(id);
 		if (p == m_sent.end()) {
 			LOG(ERROR) << "connection: " << connection_string() <<
-				", message: " << m.to_string() <<
+				", message: " << msg->to_string() <<
 				", error: there is no handler for reply";
 
 			return;
 		}
 
-		auto c = std::move(p->second);
+		auto c = p->second;
 		m_sent.erase(id);
 		guard.unlock();
 
 		VLOG(2) << "connection: " << connection_string() <<
 			", id: " << id <<
 			", removed completion callback";
-		c.complete(shared_from_this(), m);
+		c->complete(shared_from_this(), *msg);
 		return;
 	}
 
-	m_process(shared_from_this(), m);
-	if (m.hdr.flags & SCATTER_FLAGS_NEED_ACK) {
-		send_reply(m);
+	m_process(shared_from_this(), *msg);
+	if (msg->hdr.flags & SCATTER_FLAGS_NEED_ACK) {
+		send_reply(*msg);
 	}
 }
 
