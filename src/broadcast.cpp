@@ -66,13 +66,13 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 
 			if (self && (c->socket().local_endpoint() == self->socket().local_endpoint()) &&
 					(c->socket().remote_endpoint() == self->socket().remote_endpoint())) {
-				var->completed--;
+				int cmp = --var->completed;
 
 				VLOG(2) << "connection: " << self->connection_string() <<
 					": message: " << msg.to_string() <<
-					", completed: " << var->completed;
+					", completed: " << cmp;
 
-				if (var->completed == 0) {
+				if (cmp == 0) {
 					msg.hdr.status = var->err;
 					var->complete(self, msg);
 					return;
@@ -88,13 +88,13 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 							var->err = 0;
 						}
 
-						var->completed--;
+						int cmp = --var->completed;
 
 						VLOG(2) << "connection: " << self->connection_string() <<
 							", broadcast connection: " << fwd->connection_string() <<
-							", reply: " << reply.to_string() << ", completed: " << var->completed;
+							", reply: " << reply.to_string() << ", completed: " << cmp;
 
-						if (var->completed == 0) {
+						if (cmp == 0) {
 							reply.hdr.status = var->err;
 							var->complete(self, reply);
 							return;
