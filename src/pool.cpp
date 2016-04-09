@@ -12,16 +12,18 @@ io_service_pool::io_service_pool(int num) : m_work(new boost::asio::io_service::
 io_service_pool::~io_service_pool()
 {
 	stop();
-
-	for (auto &th: m_pool) {
-		th.join();
-	}
 }
 
 void io_service_pool::stop()
 {
 	m_work.reset();
 	m_io_service.stop();
+
+	for (auto &th: m_pool) {
+		th.join();
+	}
+
+	m_pool.clear();
 }
 
 boost::asio::io_service &io_service_pool::get_service() {
