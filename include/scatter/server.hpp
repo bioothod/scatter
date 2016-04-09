@@ -23,18 +23,16 @@ public:
 	std::vector<connection::cid_t> test_ids() const;
 
 private:
+	io_service_pool m_io_pool;
+	resolver<> m_resolver;
+	connection::proto::acceptor m_acceptor;
+	connection::proto::socket m_socket;
+
 	route m_route;
 
 	std::mutex m_lock;
 	std::map<uint64_t, broadcast> m_bcast;
 	std::vector<connection::cid_t> m_cids;
-
-	// io_service must be destroyed first, since it can
-	// invoke @drop() method which touches other class members.
-	io_service_pool m_io_pool;
-	resolver<> m_resolver;
-	connection::proto::acceptor m_acceptor;
-	connection::proto::socket m_socket;
 
 	void broadcast_client_message(connection::pointer client, message &msg);
 

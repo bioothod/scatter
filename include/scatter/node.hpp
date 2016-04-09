@@ -24,13 +24,11 @@ public:
 	void send(message &msg, connection::process_fn_t complete);
 
 private:
-	uint64_t m_id;
-	route m_route;
-
-	// io_service must be destroyed first, since it can
-	// invoke @drop() method which touches other class members.
 	io_service_pool m_io_pool;
 	resolver<> m_resolver;
+
+	uint64_t m_id;
+	route m_route;
 
 	void send_blocked_command(connection::pointer cn, uint64_t db, int cmd, const char *data, size_t size);
 	void send_blocked_command(uint64_t db, int cmd, const char *data, size_t size);
