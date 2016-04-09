@@ -9,8 +9,8 @@ protected:
 	stest()
 	: m_addr1("127.0.0.1:21001:2")
 	, m_addr2("127.0.0.1:21002:2")
-	, m_s1(m_addr1, 1)
-	, m_s2(m_addr2, 1)
+	, m_s1(m_addr1, 4)
+	, m_s2(m_addr2, 4)
 	{
 		LOG(INFO) << "New test starts";
 	}
