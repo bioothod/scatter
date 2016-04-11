@@ -46,6 +46,10 @@ void node::bcast_join(uint64_t db)
 {
 	send_blocked_command(db, SCATTER_CMD_BCAST_JOIN, NULL, 0);
 }
+void node::bcast_leave(uint64_t db)
+{
+	send_blocked_command(db, SCATTER_CMD_BCAST_LEAVE, NULL, 0);
+}
 
 void node::drop(connection::pointer cn, const boost::system::error_code &ec)
 {

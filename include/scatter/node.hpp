@@ -17,6 +17,7 @@ public:
 	void drop(connection::pointer cn, const boost::system::error_code &ec);
 
 	void bcast_join(uint64_t db);
+	void bcast_leave(uint64_t db);
 
 	connection::pointer get_connection(uint64_t db);
 
