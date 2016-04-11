@@ -264,7 +264,7 @@ void connection::read_header()
 		boost::asio::buffer(&m_tmp_hdr, message::header_size),
 			[this, self] (boost::system::error_code ec, std::size_t /*size*/) {
 				if (ec) {
-					LOG(ERROR) << "connection: " << connection_string() << ", error: " << ec.message();
+					LOG(INFO) << "connection: " << connection_string() << ", error: " << ec.message();
 					// reset connection, drop it from database
 					m_error(shared_from_this(), ec);
 					return;
@@ -289,7 +289,7 @@ void connection::read_data(std::shared_ptr<message> msg)
 		boost::asio::buffer(msg->data(), msg->hdr.size),
 			[this, self, msg] (boost::system::error_code ec, std::size_t /*size*/) {
 				if (ec) {
-					LOG(ERROR) << "connection: " << connection_string() << ", error: " << ec.message();
+					LOG(INFO) << "connection: " << connection_string() << ", error: " << ec.message();
 
 					// reset connection, drop it from database
 					m_error(shared_from_this(), ec);
