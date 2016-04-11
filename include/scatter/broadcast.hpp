@@ -26,6 +26,8 @@ public:
 	void join(connection::pointer client);
 	void leave(connection::pointer client);
 
+	size_t size() const;
+
 	// message must be already encoded
 	void send(message &msg, connection::process_fn_t complete);
 	void send(connection::pointer self, message &msg, connection::process_fn_t complete);

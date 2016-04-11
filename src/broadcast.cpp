@@ -103,4 +103,9 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 	}
 }
 
+size_t broadcast::size() const
+{
+	return m_clients.size();
+}
+
 }} // namespace ioremap::scatter
