@@ -46,7 +46,13 @@ public:
 
 	// message has to be already encoded
 	void send(const message &msg, process_fn_t complete);
+
+	// data will be copied into newly created message
+	void send(uint64_t id, uint64_t db, uint64_t flags, int cmd, const char *data, size_t size, process_fn_t complete);
+
 	void send_reply(const message &msg);
+
+	// data will be copied into newly created message
 	void send_blocked_command(uint64_t id, uint64_t db, int cmd, const char *data, size_t size);
 
 	const std::vector<cid_t> ids() const;

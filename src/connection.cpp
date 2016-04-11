@@ -146,6 +146,23 @@ void connection::send(const message &msg, connection::process_fn_t complete)
 	m_strand.post(std::bind(&connection::strand_write_callback, this, id, flags, buf, complete));
 }
 
+void connection::send(uint64_t id, uint64_t db, uint64_t flags, int cmd, const char *data, size_t size, connection::process_fn_t complete)
+{
+	message msg(size);
+
+	if (data && size)
+		msg.append(data, size);
+
+	msg.hdr.size = size;
+	msg.hdr.id = id;
+	msg.hdr.db = db;
+	msg.hdr.cmd = cmd;
+	msg.hdr.flags = flags;
+	msg.encode_header();
+
+	send(msg, complete);
+}
+
 void connection::send_reply(const message &msg)
 {
 	auto self(shared_from_this());
@@ -165,22 +182,10 @@ void connection::send_reply(const message &msg)
 
 void connection::send_blocked_command(uint64_t id, uint64_t db, int cmd, const char *data, size_t size)
 {
-	message msg(size);
-
-	if (data && size)
-		msg.append(data, size);
-
-	msg.hdr.size = size;
-	msg.hdr.id = id;
-	msg.hdr.db = db;
-	msg.hdr.cmd = cmd;
-	msg.hdr.flags = SCATTER_FLAGS_NEED_ACK;
-	msg.encode_header();
-
 	std::promise<int> p;
 	std::future<int> f = p.get_future();
 
-	send(msg,
+	send(id, db, SCATTER_FLAGS_NEED_ACK, cmd, data, size,
 		[&] (scatter::connection::pointer self, scatter::message &msg) {
 			if (msg.hdr.status) {
 				LOG(ERROR) << "connection: " << self->connection_string() <<
