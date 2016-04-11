@@ -62,19 +62,29 @@ connection::pointer server::connect(const std::string &addr)
 	return srv;
 }
 
+void server::drop_from_broadcast_group(connection::pointer cn)
+{
+	std::vector<uint64_t> remove;
+	std::unique_lock<std::mutex> guard(m_lock);
+
+	for (auto &group: m_bcast) {
+		group.second.leave(cn);
+		if (!group.second.size())
+			remove.push_back(group.first);
+	}
+
+	for (auto id: remove) {
+		m_bcast.erase(id);
+	}
+}
+
 void server::drop(connection::pointer cn, const boost::system::error_code &ec)
 {
 	(void) ec;
 
 	m_route.remove(cn);
 
-	std::unique_lock<std::mutex> guard(m_lock);
-
-	for (auto &p : m_bcast) {
-		broadcast &bcast = p.second;
-
-		bcast.leave(cn);
-	}
+	drop_from_broadcast_group(cn);
 }
 
 void server::join(connection::pointer srv)
@@ -151,12 +161,7 @@ void server::message_handler(connection::pointer client, message &msg)
 		break;
 	}
 	case SCATTER_CMD_BCAST_LEAVE: {
-		std::unique_lock<std::mutex> guard(m_lock);
-
-		for (auto &group: m_bcast) {
-			group.second.leave(client);
-		}
-
+		drop_from_broadcast_group(client);
 		msg.hdr.status = 0;
 		break;
 	}

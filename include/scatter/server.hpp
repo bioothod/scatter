@@ -40,6 +40,7 @@ private:
 	void schedule_accept();
 
 	void drop(connection::pointer cn, const boost::system::error_code &ec);
+	void drop_from_broadcast_group(connection::pointer cn);
 	void send_blocked_command(uint64_t db, int cmd, const char *data, size_t size);
 
 	// message has been already decoded
