@@ -421,6 +421,65 @@ TEST_F(stest, route_table_update)
 	return;
 }
 
+TEST_F(stest, leave_broadcast_groups)
+{
+	std::vector<connection::cid_t> ids1 = {0, 500};
+	std::vector<connection::cid_t> ids2 = {100, 600};
+
+	set_ids(ids1, ids2);
+
+	node c1, c2, c3;
+	uint64_t db = 123;
+
+	std::mutex lock;
+	std::condition_variable cv1, cv2;
+
+	// the first two clients will be connected to srv1
+	// the third one will be connected to srv2
+	// srv1 will add srv2 into local broadcast group
+	c1.connect(m_addr1, [&] (connection::pointer, message &) {});
+	c1.bcast_join(db);
+
+	// srv2 connects to and joins srv1
+	// srv1 receives command SCATTER_CMD_SERVER_JOIN from srv2
+	// srv1 announces local broadcast groups by sending SCATTER_CMD_BCAST_JOIN command to this server-server connection
+	// srv2 thus receives SCATTER_CMD_BCAST_JOIN command from srv1
+	connect_servers();
+
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, false), 1);
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, true), 1);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, false), 1);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, true), 0);
+
+	c2.connect(m_addr1, [&] (connection::pointer, message &) {});
+	c2.bcast_join(db);
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, false), 2);
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, true), 1);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, false), 1);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, true), 0);
+
+	c3.connect(m_addr1, [&] (connection::pointer, message &) {});
+	c3.connect(m_addr2, [&] (connection::pointer, message &) {});
+	c3.bcast_join(db);
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, false), 2);
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, true), 1);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, false), 2);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, true), 0);
+
+	c1.bcast_leave(db);
+	c2.bcast_leave(db);
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, false), 0);
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, true), 0);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, false), 1);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, true), 0);
+
+	c3.bcast_leave(db);
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, false), 0);
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, true), 0);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, false), 0);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, true), 0);
+}
+
 int main(int argc, char **argv)
 {
 	google::InitGoogleLogging(argv[0]);
