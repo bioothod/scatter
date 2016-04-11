@@ -21,6 +21,13 @@ connection::connection(io_service_pool &io, connection::process_fn_t process, er
 	  m_socket(io.get_service())
 {
 }
+connection::connection(io_service_pool &io)
+	: m_pool(io),
+	  m_strand(io.get_service()),
+	  m_socket(io.get_service())
+{
+}
+
 
 connection::~connection()
 {
@@ -348,9 +355,9 @@ const std::vector<connection::cid_t> connection::ids() const
 {
 	return m_cids;
 }
-void connection::set_ids(std::vector<connection::cid_t> &cids)
+void connection::set_ids(const std::vector<connection::cid_t> &cids)
 {
-	m_cids.swap(cids);
+	m_cids = cids;
 }
 
 void connection::set_connection_strings()

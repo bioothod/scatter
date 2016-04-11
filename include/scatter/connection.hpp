@@ -33,6 +33,9 @@ public:
 	static pointer create(io_service_pool& io_pool, process_fn_t process, error_fn_t error) {
 		return pointer(new connection(io_pool, process, error));
 	}
+	static pointer create_empty(io_service_pool &io_pool) {
+		return pointer(new connection(io_pool));
+	}
 
 	proto::socket& socket();
 	std::string connection_string() const;
@@ -56,7 +59,7 @@ public:
 	void send_blocked_command(uint64_t id, uint64_t db, int cmd, const char *data, size_t size);
 
 	const std::vector<cid_t> ids() const;
-	void set_ids(std::vector<cid_t> &cids);
+	void set_ids(const std::vector<cid_t> &cids);
 
 	~connection();
 private:
@@ -87,6 +90,7 @@ private:
 
 	connection(io_service_pool &io, process_fn_t process, error_fn_t errror, typename proto::socket &&socket);
 	connection(io_service_pool &io, process_fn_t process, error_fn_t error);
+	connection(io_service_pool &io);
 
 	void strand_write_callback(uint64_t id, uint64_t flags, message::raw_buffer_t buf, process_fn_t complete);
 	void write_next_buf(message::raw_buffer_t buf);
