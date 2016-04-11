@@ -38,7 +38,7 @@ protected:
 TEST_F(stest, route)
 {
 	std::vector<connection::cid_t> ids1 = {0, 500};
-	std::vector<connection::cid_t> ids2 = {200, 600};
+	std::vector<connection::cid_t> ids2 = {100, 600};
 
 	set_ids(ids1, ids2);
 	connect_servers();
@@ -61,7 +61,7 @@ TEST_F(stest, route)
 
 	cn = c.get_connection(1000000);
 	ASSERT_NE(cn.use_count(), 0);
-	ASSERT_EQ(cn->remote_string(), m_addr1);
+	ASSERT_EQ(cn->remote_string(), m_addr2);
 
 	return;
 }
@@ -332,7 +332,6 @@ TEST_F(stest, bcast_many_to_many)
 
 	return;
 }
-
 
 int main(int argc, char **argv)
 {
