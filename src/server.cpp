@@ -91,8 +91,8 @@ void server::join(connection::pointer srv)
 {
 	std::stringstream buffer;
 	msgpack::pack(buffer, m_cids);
-
 	std::string buf(buffer.str());
+
 	srv->send_blocked_command(m_cids[0], 0, SCATTER_CMD_SERVER_JOIN, buf.data(), buf.size());
 }
 
@@ -110,6 +110,33 @@ void server::send_blocked_command(uint64_t db, int cmd, const char *data, size_t
 	cn->send_blocked_command(m_cids[0], db, cmd, data, size);
 }
 
+void server::announce_broadcast_groups(connection::pointer connected)
+{
+	std::unique_lock<std::mutex> guard(m_lock);
+	for (auto &bg: m_bcast) {
+		uint64_t group = bg.first;
+
+		auto cn = m_route.find(group);
+		if (!cn)
+			continue;
+
+		LOG(INFO) << "connection: " << connected->connection_string() <<
+			", announcing broadcast group: " << group <<
+			", check connection: " << cn->connection_string();
+
+		if (cn->socket().remote_endpoint() == connected->socket().remote_endpoint()) {
+			LOG(INFO) << "connection: " << cn->connection_string() << ", announcing broadcast group: " << group;
+
+			// when remote node gets new message into broadcast group @group from some other client, it will
+			// be sent to this server and will be broadcasted further to clients
+			connected->send(m_cids[0], group, 0, SCATTER_CMD_BCAST_JOIN, NULL, 0, [&] (connection::pointer, message &) {});
+
+			// when this node gets new message into broadcast group @group,
+			// it should also broadcast it to remote server
+			bg.second.join(cn);
+		}
+	}
+}
 
 void server::broadcast_client_message(connection::pointer client, message &msg)
 {
@@ -145,13 +172,13 @@ void server::broadcast_client_message(connection::pointer client, message &msg)
 // otherwise connection's code will send another ack
 void server::message_handler(connection::pointer client, message &msg)
 {
-	VLOG(1) << "connection: " << client->connection_string() << ", server received message: " << msg.to_string();
-
 	if (msg.hdr.cmd >= SCATTER_CMD_CLIENT) {
+		VLOG(1) << "connection: " << client->connection_string() << ", server received message: " << msg.to_string();
 		broadcast_client_message(client, msg);
 		return;
 	}
 
+	LOG(INFO) << "connection: " << client->connection_string() << ", server received message: " << msg.to_string();
 	switch (msg.hdr.cmd) {
 	case SCATTER_CMD_BCAST_JOIN: {
 		std::unique_lock<std::mutex> guard(m_lock);
@@ -171,17 +198,8 @@ void server::message_handler(connection::pointer client, message &msg)
 
 		std::string rdata(buffer.str());
 
-		message reply(rdata.size());
-		reply.append(rdata.data(), rdata.size());
-
-		reply.hdr.size = rdata.size();
-		reply.hdr.cmd = SCATTER_CMD_REMOTE_IDS;
-		reply.hdr.flags = SCATTER_FLAGS_REPLY;
-		reply.hdr.id = msg.hdr.id;
-		reply.hdr.db = msg.hdr.db;
-		reply.encode_header();
-
-		client->send(reply, [] (connection::pointer, message &) {});
+		client->send(msg.hdr.id, msg.hdr.db, SCATTER_FLAGS_REPLY, SCATTER_CMD_REMOTE_IDS, rdata.data(), rdata.size(),
+				[] (connection::pointer, message &) {});
 
 		// server has sent reply, no need to send another one
 		msg.hdr.flags &= ~SCATTER_FLAGS_NEED_ACK;
@@ -197,6 +215,8 @@ void server::message_handler(connection::pointer client, message &msg)
 
 			client->set_ids(cids);
 			m_route.add(client);
+
+			announce_broadcast_groups(client);
 		} catch (const std::exception &e) {
 			LOG(ERROR) << "connection: " << client->connection_string() <<
 				", message: " << msg.to_string() <<
@@ -206,6 +226,7 @@ void server::message_handler(connection::pointer client, message &msg)
 			return;
 		}
 		msg.hdr.status = 0;
+		break;
 	}
 	case SCATTER_CMD_SERVER_LEAVE: {
 		m_route.remove(client);

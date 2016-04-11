@@ -34,6 +34,8 @@ private:
 	std::map<uint64_t, broadcast> m_bcast;
 	std::vector<connection::cid_t> m_cids;
 
+	void announce_broadcast_groups(connection::pointer connected);
+
 	void broadcast_client_message(connection::pointer client, message &msg);
 
 	void generate_ids();
