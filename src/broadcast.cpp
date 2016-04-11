@@ -12,20 +12,42 @@ broadcast::broadcast(broadcast &&other)
 {
 }
 
-void broadcast::join(connection::pointer client)
+broadcast::~broadcast()
+{
+	// leave all groups which are connected over server-server connections
+	message msg;
+	msg.hdr.cmd = SCATTER_CMD_BCAST_LEAVE;
+	msg.hdr.db = m_id;
+	msg.encode_header();
+	for (auto srv: m_servers) {
+		send(msg, [&] (connection::pointer fwd, message &reply) {});
+	}
+}
+
+void broadcast::join(connection::pointer client, bool server_connection)
 {
 	std::lock_guard<std::mutex> m_guard(m_lock);
-	m_clients.insert(client);
+
+	if (server_connection)
+		m_servers.insert(client);
+	else
+		m_clients.insert(client);
 
 	VLOG(2) << "broadcast: " << m_id <<
 			", connection: " << client->connection_string() <<
 			", command: join";
 }
 
+void broadcast::join(connection::pointer client)
+{
+	join(client, false);
+}
+
 void broadcast::leave(connection::pointer client)
 {
 	std::lock_guard<std::mutex> m_guard(m_lock);
 	m_clients.erase(client);
+	m_servers.erase(client);
 
 	VLOG(2) << "broadcast: " << m_id <<
 			", connection: " << client->connection_string() <<
@@ -41,7 +63,11 @@ void broadcast::send(message &msg, connection::process_fn_t complete)
 void broadcast::send(connection::pointer self, message &msg, connection::process_fn_t complete)
 {
 	std::unique_lock<std::mutex> guard(m_lock);
-	std::vector<connection::pointer> copy(m_clients.begin(), m_clients.end());
+	std::vector<connection::pointer> copy;
+	copy.reserve(m_clients.size() + m_servers.size());
+
+	copy.insert(copy.end(), m_clients.begin(), m_clients.end());
+	copy.insert(copy.end(), m_servers.begin(), m_servers.end());
 	guard.unlock();
 
 	int err = -ENOENT;
@@ -103,9 +129,13 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 	}
 }
 
-size_t broadcast::size() const
+size_t broadcast::num_clients() const
 {
 	return m_clients.size();
+}
+size_t broadcast::num_servers() const
+{
+	return m_servers.size();
 }
 
 }} // namespace ioremap::scatter
