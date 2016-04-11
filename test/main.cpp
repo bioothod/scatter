@@ -91,7 +91,7 @@ TEST_F(stest, bcast_one_to_one)
 			});
 	c2.bcast_join(db);
 
-	int c1_bias = 1000;
+	int c1_bias = 10000;
 
 	int n = 10000;
 	for (int i = 0; i < n; ++i) {
@@ -110,7 +110,7 @@ TEST_F(stest, bcast_one_to_one)
 	}
 
 	std::unique_lock<std::mutex> l(lock);
-	cv.wait(l, [&] {return c1_completed == n;});
+	cv.wait_for(l, std::chrono::seconds(10), [&] {return c1_completed == n;});
 	l.unlock();
 
 	ASSERT_EQ(c1_completed, n);
@@ -176,14 +176,14 @@ TEST_F(stest, bcast_one_to_one_bidirectional)
 	}
 
 	std::unique_lock<std::mutex> l1(lock);
-	cv1.wait(l1, [&] {return c1_completed == n;});
+	cv1.wait_for(l1, std::chrono::seconds(10), [&] {return c1_completed == n;});
 	l1.unlock();
 
 	ASSERT_EQ(c1_completed, n);
 	ASSERT_EQ(c1_completed, c2_counter);
 
 	std::unique_lock<std::mutex> l2(lock);
-	cv2.wait(l2, [&] {return c2_completed == n;});
+	cv2.wait_for(l2, std::chrono::seconds(10), [&] {return c2_completed == n;});
 	l2.unlock();
 
 	ASSERT_EQ(c2_completed, n);
@@ -243,7 +243,7 @@ TEST_F(stest, bcast_one_to_many)
 	}
 
 	std::unique_lock<std::mutex> l1(lock);
-	cv1.wait(l1, [&] {return c1_completed == n;});
+	cv1.wait_for(l1, std::chrono::seconds(10), [&] {return c1_completed == n;});
 	l1.unlock();
 
 	ASSERT_EQ(c1_completed, n);
@@ -315,14 +315,14 @@ TEST_F(stest, bcast_many_to_many)
 	}
 
 	std::unique_lock<std::mutex> l1(lock);
-	cv1.wait(l1, [&] {return c1_completed == n;});
+	cv1.wait_for(l1, std::chrono::seconds(10), [&] {return c1_completed == n;});
 	l1.unlock();
 
 	ASSERT_EQ(c1_completed, n);
 	ASSERT_EQ(c1_completed, c2_counter);
 
 	std::unique_lock<std::mutex> l2(lock);
-	cv2.wait(l2, [&] {return c2_completed == n;});
+	cv2.wait_for(l2, std::chrono::seconds(10), [&] {return c2_completed == n;});
 	l2.unlock();
 
 	ASSERT_EQ(c2_completed, n);
