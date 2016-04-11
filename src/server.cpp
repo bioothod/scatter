@@ -11,6 +11,11 @@ server::server(const std::string &addr, int io_pool_size)
 	, m_socket(m_io_pool.get_service())
 {
 	generate_ids();
+
+	auto self = connection::create_empty(m_io_pool);
+	self->set_ids(m_cids);
+	m_route.add(self);
+
 	schedule_accept();
 }
 server::~server()
@@ -68,8 +73,11 @@ void server::drop_from_broadcast_group(connection::pointer cn)
 	std::unique_lock<std::mutex> guard(m_lock);
 
 	for (auto &group: m_bcast) {
-		group.second.leave(cn);
-		if (!group.second.size())
+		broadcast &bcast = group.second;
+
+		bcast.leave(cn);
+
+		if (!bcast.num_clients())
 			remove.push_back(group.first);
 	}
 
@@ -85,6 +93,11 @@ void server::drop(connection::pointer cn, const boost::system::error_code &ec)
 	m_route.remove(cn);
 
 	drop_from_broadcast_group(cn);
+}
+
+bool server::connection_to_self(connection::pointer cn)
+{
+	return cn->ids() == m_cids;
 }
 
 void server::join(connection::pointer srv)
@@ -107,7 +120,35 @@ void server::send_blocked_command(uint64_t db, int cmd, const char *data, size_t
 		throw_error(-ENOENT, "node is not connected to anything which can handle database %ld", db);
 	}
 
-	cn->send_blocked_command(m_cids[0], db, cmd, data, size);
+	if (!connection_to_self(cn))
+		cn->send_blocked_command(m_cids[0], db, cmd, data, size);
+}
+
+void server::announce_broadcast_group_nolock(uint64_t group, connection::pointer connected)
+{
+	auto it = m_bcast.find(group);
+	if (it == m_bcast.end())
+		return;
+
+	auto cn = m_route.find(group);
+	if (!cn || connection_to_self(cn))
+		return;
+
+	LOG(INFO) << "connection: " << connected->connection_string() <<
+		", announcing broadcast group: " << group <<
+		", check connection: " << cn->connection_string();
+
+	if (cn->socket().remote_endpoint() == connected->socket().remote_endpoint()) {
+		LOG(INFO) << "connection: " << cn->connection_string() << ", announcing broadcast group: " << group;
+
+		// when remote node gets new message into broadcast group @group from some other client, it will
+		// be sent to this server and will be broadcasted further to clients
+		connected->send(m_cids[0], group, 0, SCATTER_CMD_BCAST_JOIN, NULL, 0, [&] (connection::pointer, message &) {});
+
+		// when this node gets new message into broadcast group @group,
+		// it should also broadcast it to remote server
+		it->second.join(cn, true);
+	}
 }
 
 void server::announce_broadcast_groups(connection::pointer connected)
@@ -116,25 +157,7 @@ void server::announce_broadcast_groups(connection::pointer connected)
 	for (auto &bg: m_bcast) {
 		uint64_t group = bg.first;
 
-		auto cn = m_route.find(group);
-		if (!cn)
-			continue;
-
-		LOG(INFO) << "connection: " << connected->connection_string() <<
-			", announcing broadcast group: " << group <<
-			", check connection: " << cn->connection_string();
-
-		if (cn->socket().remote_endpoint() == connected->socket().remote_endpoint()) {
-			LOG(INFO) << "connection: " << cn->connection_string() << ", announcing broadcast group: " << group;
-
-			// when remote node gets new message into broadcast group @group from some other client, it will
-			// be sent to this server and will be broadcasted further to clients
-			connected->send(m_cids[0], group, 0, SCATTER_CMD_BCAST_JOIN, NULL, 0, [&] (connection::pointer, message &) {});
-
-			// when this node gets new message into broadcast group @group,
-			// it should also broadcast it to remote server
-			bg.second.join(cn);
-		}
+		announce_broadcast_group_nolock(group, connected);
 	}
 }
 
@@ -184,6 +207,10 @@ void server::message_handler(connection::pointer client, message &msg)
 		std::unique_lock<std::mutex> guard(m_lock);
 
 		broadcast::create_and_insert(m_bcast, msg.db(), client);
+		auto srv = m_route.find(msg.db());
+		if (srv && !connection_to_self(srv))
+			announce_broadcast_group_nolock(msg.db(), srv);
+
 		msg.hdr.status = 0;
 		break;
 	}
@@ -240,11 +267,30 @@ void server::message_handler(connection::pointer client, message &msg)
 
 void server::test_set_ids(const std::vector<connection::cid_t> &cids)
 {
+	auto self = connection::create_empty(m_io_pool);
+	self->set_ids(m_cids);
+	m_route.remove(self);
+
 	m_cids = cids;
+	self->set_ids(m_cids);
+	m_route.add(self);
 }
 std::vector<connection::cid_t> server::test_ids() const
 {
 	return m_cids;
+}
+size_t server::test_bcast_num_connections(uint64_t db, bool server)
+{
+	size_t num = 0;
+	std::unique_lock<std::mutex> guard(m_lock);
+	auto it = m_bcast.find(db);
+	if (it != m_bcast.end()) {
+		if (server)
+			num = it->second.num_servers();
+		else
+			num = it->second.num_clients();
+	}
+	return num;
 }
 
 }} // namespace ioremap::scatter

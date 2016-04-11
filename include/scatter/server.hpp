@@ -21,6 +21,7 @@ public:
 	// that route info hasn't been sent to remote nodes yet
 	void test_set_ids(const std::vector<connection::cid_t> &cids);
 	std::vector<connection::cid_t> test_ids() const;
+	size_t test_bcast_num_connections(uint64_t db, bool server);
 
 private:
 	io_service_pool m_io_pool;
@@ -34,7 +35,11 @@ private:
 	std::map<uint64_t, broadcast> m_bcast;
 	std::vector<connection::cid_t> m_cids;
 
+	// checks whether connection (usually obtained from route table) is actually artificially added into route table 'self-connection'
+	bool connection_to_self(connection::pointer cn);
+
 	void announce_broadcast_groups(connection::pointer connected);
+	void announce_broadcast_group_nolock(uint64_t db, connection::pointer connected);
 
 	void broadcast_client_message(connection::pointer client, message &msg);
 
