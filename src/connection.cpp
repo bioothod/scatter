@@ -193,7 +193,7 @@ void connection::send_blocked_command(uint64_t id, uint64_t db, int cmd, const c
 	std::future<int> f = p.get_future();
 
 	send(id, db, SCATTER_FLAGS_NEED_ACK, cmd, data, size,
-		[&] (scatter::connection::pointer self, scatter::message &msg) {
+		[&] (pointer self, message &msg) {
 			if (msg.hdr.status) {
 				LOG(ERROR) << "connection: " << self->connection_string() <<
 					", message: " << msg.to_string() <<
