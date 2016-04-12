@@ -9,6 +9,7 @@ broadcast::broadcast(uint64_t id) : m_id(id)
 broadcast::broadcast(broadcast &&other)
 	: m_id(other.m_id)
 	, m_clients(std::move(other.m_clients))
+	, m_servers(std::move(other.m_servers))
 {
 }
 
@@ -19,8 +20,9 @@ broadcast::~broadcast()
 	msg.hdr.cmd = SCATTER_CMD_BCAST_LEAVE;
 	msg.hdr.db = m_id;
 	msg.encode_header();
+
 	for (auto srv: m_servers) {
-		send(msg, [&] (connection::pointer fwd, message &reply) {});
+		srv->send(msg, [&] (connection::pointer, message &) {});
 	}
 }
 
