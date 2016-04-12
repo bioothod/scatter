@@ -143,7 +143,7 @@ void server::announce_broadcast_group_nolock(uint64_t group, connection::pointer
 
 		// when remote node gets new message into broadcast group @group from some other client, it will
 		// be sent to this server and will be broadcasted further to clients
-		connected->send(m_cids[0], group, 0, SCATTER_CMD_BCAST_JOIN, NULL, 0, [&] (connection::pointer, message &) {});
+		connected->send_blocked_command(m_cids[0], group, SCATTER_CMD_BCAST_JOIN, NULL, 0);
 
 		// when this node gets new message into broadcast group @group,
 		// it should also broadcast it to remote server
