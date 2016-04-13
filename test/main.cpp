@@ -103,7 +103,7 @@ TEST_F(stest, bcast_one_to_one)
 		msg.encode_header();
 
 		c1.send(msg, [&] (connection::pointer, message &reply) {
-					ASSERT_EQ(reply.id(), c1_bias + c1_completed.load());
+					ASSERT_EQ(reply.hdr.id, c1_bias + c1_completed.load());
 					c1_completed++;
 					cv.notify_one();
 				});
@@ -157,7 +157,7 @@ TEST_F(stest, bcast_one_to_one_bidirectional)
 		msg.encode_header();
 
 		c1.send(msg, [&] (connection::pointer, message &reply) {
-					ASSERT_EQ(reply.id(), c1_bias + c1_completed.load());
+					ASSERT_EQ(reply.hdr.id, c1_bias + c1_completed.load());
 					c1_completed++;
 					cv1.notify_one();
 				});
@@ -169,7 +169,7 @@ TEST_F(stest, bcast_one_to_one_bidirectional)
 		m2.hdr.flags = SCATTER_FLAGS_NEED_ACK;
 		m2.encode_header();
 		c2.send(m2, [&] (connection::pointer, message &reply) {
-					ASSERT_EQ(reply.id(), c2_bias + c2_completed.load());
+					ASSERT_EQ(reply.hdr.id, c2_bias + c2_completed.load());
 					c2_completed++;
 					cv2.notify_one();
 				});
@@ -236,7 +236,7 @@ TEST_F(stest, bcast_one_to_many)
 		msg.encode_header();
 
 		c1.send(msg, [&] (connection::pointer, message &reply) {
-					ASSERT_EQ(reply.id(), c1_bias + c1_completed.load());
+					ASSERT_EQ(reply.hdr.id, c1_bias + c1_completed.load());
 					c1_completed++;
 					cv1.notify_one();
 				});
@@ -297,7 +297,7 @@ TEST_F(stest, bcast_many_to_many)
 		msg.encode_header();
 
 		c1.send(msg, [&] (connection::pointer, message &reply) {
-					ASSERT_EQ(reply.id(), c1_bias + c1_completed.load());
+					ASSERT_EQ(reply.hdr.id, c1_bias + c1_completed.load());
 					c1_completed++;
 					cv1.notify_one();
 				});
@@ -308,7 +308,7 @@ TEST_F(stest, bcast_many_to_many)
 		m2.hdr.flags = SCATTER_FLAGS_NEED_ACK;
 		m2.encode_header();
 		c2.send(m2, [&] (connection::pointer, message &reply) {
-					ASSERT_EQ(reply.id(), c2_bias + c2_completed.load());
+					ASSERT_EQ(reply.hdr.id, c2_bias + c2_completed.load());
 					c2_completed++;
 					cv2.notify_one();
 				});
@@ -385,7 +385,7 @@ TEST_F(stest, route_table_update)
 		msg.encode_header();
 
 		c1.send(msg, [&] (connection::pointer, message &reply) {
-					ASSERT_EQ(reply.id(), c1_bias + c1_completed.load());
+					ASSERT_EQ(reply.hdr.id, c1_bias + c1_completed.load());
 					c1_completed++;
 					cv1.notify_one();
 				});
@@ -396,7 +396,7 @@ TEST_F(stest, route_table_update)
 		m2.hdr.flags = SCATTER_FLAGS_NEED_ACK;
 		m2.encode_header();
 		c2.send(m2, [&] (connection::pointer, message &reply) {
-					ASSERT_EQ(reply.id(), c2_bias + c2_completed.load());
+					ASSERT_EQ(reply.hdr.id, c2_bias + c2_completed.load());
 					c2_completed++;
 					cv2.notify_one();
 				});
@@ -502,7 +502,7 @@ TEST_F(stest, bcast_one_to_one_bidirectional_different_servers)
 	c1.connect(m_addr1, [&] (connection::pointer cn, message &msg) {
 					VLOG(2) << "connection: " << cn->connection_string() <<
 						", client1 received message: " << msg.to_string();
-					ASSERT_EQ(msg.id(), c2_bias + c1_counter);
+					ASSERT_EQ(msg.hdr.id, c2_bias + c1_counter);
 					c1_counter++;
 			});
 	c1.bcast_join(db);
@@ -511,7 +511,7 @@ TEST_F(stest, bcast_one_to_one_bidirectional_different_servers)
 	c2.connect(m_addr2, [&] (connection::pointer cn, message &msg) {
 					VLOG(2) << "connection: " << cn->connection_string() <<
 						", client2 received message: " << msg.to_string();
-					ASSERT_EQ(msg.id(), c1_bias + c2_counter);
+					ASSERT_EQ(msg.hdr.id, c1_bias + c2_counter);
 					c2_counter++;
 			});
 	c2.bcast_join(db);
@@ -526,7 +526,7 @@ TEST_F(stest, bcast_one_to_one_bidirectional_different_servers)
 		msg.encode_header();
 
 		c1.send(msg, [&] (connection::pointer, message &reply) {
-					ASSERT_EQ(reply.id(), c1_bias + c1_completed.load());
+					ASSERT_EQ(reply.hdr.id, c1_bias + c1_completed.load());
 					c1_completed++;
 					cv1.notify_one();
 				});
@@ -537,7 +537,7 @@ TEST_F(stest, bcast_one_to_one_bidirectional_different_servers)
 		m2.hdr.flags = SCATTER_FLAGS_NEED_ACK;
 		m2.encode_header();
 		c2.send(m2, [&] (connection::pointer, message &reply) {
-					ASSERT_EQ(reply.id(), c2_bias + c2_completed.load());
+					ASSERT_EQ(reply.hdr.id, c2_bias + c2_completed.load());
 					c2_completed++;
 					cv2.notify_one();
 				});
