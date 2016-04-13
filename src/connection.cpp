@@ -9,7 +9,8 @@ connection::connection(io_service_pool &io, connection::process_fn_t process, er
 	  m_strand(io.get_service()),
 	  m_process(process),
 	  m_error(error),
-	  m_socket(std::move(socket))
+	  m_socket(std::move(socket)),
+	  m_transactions(0)
 {
 	set_connection_strings();
 }
@@ -18,13 +19,15 @@ connection::connection(io_service_pool &io, connection::process_fn_t process, er
 	  m_strand(io.get_service()),
 	  m_process(process),
 	  m_error(error),
-	  m_socket(io.get_service())
+	  m_socket(io.get_service()),
+	  m_transactions(0)
 {
 }
 connection::connection(io_service_pool &io)
 	: m_pool(io),
 	  m_strand(io.get_service()),
-	  m_socket(io.get_service())
+	  m_socket(io.get_service()),
+	  m_transactions(0)
 {
 }
 
@@ -86,27 +89,20 @@ void connection::connect(const connection::resolver_iterator it)
 				}
 
 				set_connection_strings();
-				p.set_value(0);
 
 				read_header();
+				request_remote_ids(p);
 			});
-
 	f.get();
-
-	request_remote_ids();
 }
 
-void connection::request_remote_ids()
+void connection::request_remote_ids(std::promise<int> &p)
 {
-	std::promise<int> p;
-	std::future<int> f = p.get_future();
-
 	auto self(shared_from_this());
 
 	std::shared_ptr<message> msg = std::make_shared<message>();
-	msg->hdr.flags |= SCATTER_FLAGS_NEED_ACK;
+	msg->hdr.flags = SCATTER_FLAGS_NEED_ACK;
 	msg->hdr.cmd = SCATTER_CMD_REMOTE_IDS;
-	msg->encode_header();
 
 	send(*msg, [this, self, msg, &p] (pointer, message &reply) {
 				if (reply.hdr.status) {
@@ -119,8 +115,6 @@ void connection::request_remote_ids()
 
 				parse_remote_ids(p, reply);
 			});
-
-	f.get();
 }
 
 // message is already decoded
@@ -141,16 +135,17 @@ void connection::parse_remote_ids(std::promise<int> &p, message &msg)
 	p.set_value(0);
 }
 
-// message has to be already encoded
-void connection::send(const message &msg, connection::process_fn_t complete)
+void connection::send(message &msg, connection::process_fn_t complete)
 {
 	auto buf = msg.raw_buffer();
-	uint64_t id = msg.id();
-	uint64_t flags = msg.flags();
+
+	if (msg.hdr.trans == 0)
+		msg.hdr.trans = ++m_transactions;
+	msg.encode_header();
 
 	VLOG(2) << "connection: " << connection_string() << ", sending data: " << msg.to_string();
 
-	m_strand.post(std::bind(&connection::strand_write_callback, this, id, flags, buf, complete));
+	m_strand.post(std::bind(&connection::strand_write_callback, this, msg.trans(), msg.flags(), buf, complete));
 }
 
 void connection::send(uint64_t id, uint64_t db, uint64_t flags, int cmd, const char *data, size_t size, connection::process_fn_t complete)
@@ -165,7 +160,6 @@ void connection::send(uint64_t id, uint64_t db, uint64_t flags, int cmd, const c
 	msg.hdr.db = db;
 	msg.hdr.cmd = cmd;
 	msg.hdr.flags = flags;
-	msg.encode_header();
 
 	send(msg, complete);
 }
@@ -179,7 +173,6 @@ void connection::send_reply(const message &msg)
 	reply->hdr.size = 0;
 	reply->hdr.flags &= ~SCATTER_FLAGS_NEED_ACK;
 	reply->hdr.flags |= SCATTER_FLAGS_REPLY;
-	reply->encode_header();
 
 	VLOG(2) << "connection: " << connection_string() << ", sending reply back: " << reply->to_string();
 
@@ -212,10 +205,10 @@ void connection::send_blocked_command(uint64_t id, uint64_t db, int cmd, const c
 }
 
 
-void connection::strand_write_callback(uint64_t id, uint64_t flags, message::raw_buffer_t buf, connection::process_fn_t complete)
+void connection::strand_write_callback(uint64_t trans, uint64_t flags, message::raw_buffer_t buf, connection::process_fn_t complete)
 {
 	std::shared_ptr<connection::completion_t> c = std::make_shared<connection::completion_t>();
-	c->id = id;
+	c->trans = trans;
 	c->flags = flags;
 	c->buf = buf;
 	c->complete = complete;
@@ -225,10 +218,10 @@ void connection::strand_write_callback(uint64_t id, uint64_t flags, message::raw
 
 	// only put request messages which require acknowledge into the map
 	if (flags & SCATTER_FLAGS_NEED_ACK) {
-		m_sent[id] = c;
+		m_sent[trans] = c;
 
 		VLOG(2) << "connection: " << connection_string() <<
-			", id: " << id <<
+			", trans: " << trans <<
 			", added completion callback";
 	}
 
@@ -255,7 +248,7 @@ void connection::write_completed(const boost::system::error_code &error, size_t 
 	auto out = m_outgoing.front();
 
 	VLOG(2) << "connection: " << connection_string() <<
-		", id: " << out->id <<
+		", trans: " << out->trans <<
 		", write completed";
 
 	m_outgoing.pop_front();
@@ -322,10 +315,10 @@ void connection::read_data(std::shared_ptr<message> msg)
 void connection::process_message(std::shared_ptr<message> msg)
 {
 	if (msg->hdr.flags & SCATTER_FLAGS_REPLY) {
-		uint64_t id = msg->id();
+		uint64_t trans = msg->trans();
 
 		std::unique_lock<std::mutex> guard(m_lock);
-		auto p = m_sent.find(id);
+		auto p = m_sent.find(trans);
 		if (p == m_sent.end()) {
 			LOG(ERROR) << "connection: " << connection_string() <<
 				", message: " << msg->to_string() <<
@@ -335,11 +328,11 @@ void connection::process_message(std::shared_ptr<message> msg)
 		}
 
 		auto c = p->second;
-		m_sent.erase(id);
+		m_sent.erase(p);
 		guard.unlock();
 
 		VLOG(2) << "connection: " << connection_string() <<
-			", id: " << id <<
+			", trans: " << trans <<
 			", removed completion callback";
 		c->complete(shared_from_this(), *msg);
 		return;
@@ -367,6 +360,16 @@ void connection::set_connection_strings()
 			std::to_string(m_socket.local_endpoint().port()) + ":" + fam;
 	m_remote_string = m_socket.remote_endpoint().address().to_string() + ":" +
 			std::to_string(m_socket.remote_endpoint().port()) + ":" + fam;
+}
+
+void connection::request_remote_nodes(process_fn_t complete)
+{
+	message msg;
+	msg.hdr.id = m_cids[0];
+	msg.hdr.cmd = SCATTER_CMD_CONNECTIONS;
+	msg.hdr.flags = SCATTER_FLAGS_NEED_ACK;
+
+	send(msg, complete);
 }
 
 }} // namespace ioremap::scatter

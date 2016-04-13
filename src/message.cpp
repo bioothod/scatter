@@ -6,11 +6,12 @@ namespace ioremap { namespace scatter {
 
 header::header()
 {
-	memset((char *)&this->id, 0, sizeof(header));
+	memset((char *)&this->trans, 0, sizeof(header));
 }
 
 void header::convert()
 {
+	trans = scatter_bswap64(trans);
 	id = scatter_bswap64(id);
 	db = scatter_bswap64(db);
 	cmd = scatter_bswap32(cmd);
@@ -29,13 +30,14 @@ std::string header::cmd_string() const
 			{ SCATTER_CMD_BCAST_JOIN, "[bcast_join]" },
 			{ SCATTER_CMD_BCAST_LEAVE, "[bcast_leave]" },
 			{ SCATTER_CMD_REMOTE_IDS, "[remote_ids]" },
+			{ SCATTER_CMD_CONNECTIONS, "[connections]" },
 			{ SCATTER_CMD_CLIENT, "[client]" },
 		};
 
 		return command_strings[cmd];
 	}
 
-	return "[unsupported]";
+	return "";
 }
 
 std::string header::flags_string() const
@@ -95,9 +97,9 @@ bool message::encode_header()
 	return true;
 }
 
-uint64_t message::id() const
+uint64_t message::trans() const
 {
-	return hdr.id;
+	return hdr.trans;
 }
 
 uint64_t message::flags() const
@@ -173,7 +175,8 @@ void message::advance(size_t size)
 std::string message::to_string() const
 {
 	std::ostringstream ss;
-	ss <<	"[id: " << hdr.id <<
+	ss <<	"[trans: " << hdr.trans <<
+		", id: " << hdr.id <<
 		", db: " << hdr.db <<
 		", status: " << hdr.status <<
 		", cmd: " << hdr.cmd << " " << hdr.cmd_string() <<

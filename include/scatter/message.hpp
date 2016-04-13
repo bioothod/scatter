@@ -20,6 +20,7 @@ enum {
 	SCATTER_CMD_BCAST_JOIN,
 	SCATTER_CMD_BCAST_LEAVE,
 	SCATTER_CMD_REMOTE_IDS,
+	SCATTER_CMD_CONNECTIONS,
 	SCATTER_CMD_CLIENT	= 1024,
 	__SCATTER_CMD_MAX
 };
@@ -31,6 +32,7 @@ enum {
 #define SCATTER_FLAGS_NEED_ACK		(1<<1)
 
 struct header {
+	uint64_t		trans;
 	uint64_t		id;
 	uint64_t		db;
 	int			cmd;
@@ -66,7 +68,7 @@ public:
 	bool decode_header();
 	bool encode_header();
 
-	uint64_t id() const;
+	uint64_t trans() const;
 	uint64_t flags() const;
 	uint64_t db() const;
 
