@@ -124,41 +124,74 @@ void server::send_blocked_command(uint64_t db, int cmd, const char *data, size_t
 		cn->send_blocked_command(m_cids[0], db, cmd, data, size);
 }
 
-void server::announce_broadcast_group_nolock(uint64_t group, connection::pointer connected)
+bool server::announce_broadcast_group_nolock(uint64_t group, connection::pointer client, connection::process_fn_t complete)
 {
 	auto it = m_bcast.find(group);
-	if (it == m_bcast.end())
-		return;
+	if (it == m_bcast.end()) {
+		message msg;
+		msg.hdr.db = group;
+		complete(connection::pointer(), msg);
+		return false;
+	}
 
 	auto cn = m_route.find(group);
-	if (!cn || connection_to_self(cn))
-		return;
-
-	LOG(INFO) << "connection: " << connected->connection_string() <<
-		", announcing broadcast group: " << group <<
-		", check connection: " << cn->connection_string();
-
-	if (cn->socket().remote_endpoint() == connected->socket().remote_endpoint()) {
-		LOG(INFO) << "connection: " << cn->connection_string() << ", announcing broadcast group: " << group;
-
-		// when remote node gets new message into broadcast group @group from some other client, it will
-		// be sent to this server and will be broadcasted further to clients
-		connected->send_blocked_command(m_cids[0], group, SCATTER_CMD_BCAST_JOIN, NULL, 0);
-
-		// when this node gets new message into broadcast group @group,
-		// it should also broadcast it to remote server
-		it->second.join(cn, true);
+	if (!cn || connection_to_self(cn) || (client && cn == client)) {
+		message msg;
+		msg.hdr.db = group;
+		complete(cn, msg);
+		return false;
 	}
+
+	LOG(INFO) << "connection: " << cn->connection_string() << ", announcing broadcast group: " << group;
+
+	// when remote node gets new message into broadcast group @group from some other client, it will
+	// be sent to this server and will be broadcasted further to clients
+	cn->send(m_cids[0], group, SCATTER_FLAGS_NEED_ACK, SCATTER_CMD_BCAST_JOIN, NULL, 0, complete);
+
+	// when this node gets new message into broadcast group @group,
+	// it should also broadcast it to remote server
+	it->second.join(cn, true);
+	return true;
 }
 
-void server::announce_broadcast_groups(connection::pointer connected)
+void server::announce_broadcast_groups(connection::pointer client, message &msg)
 {
+	struct completion {
+		uint64_t id;
+		uint64_t db;
+		connection::pointer cn;
+		std::atomic_int refcnt;
+	};
+
 	std::unique_lock<std::mutex> guard(m_lock);
+
+	auto cm = std::make_shared<completion>();
+	cm->cn = client;
+	cm->refcnt = m_bcast.size() + 1;
+	cm->id = msg.hdr.id;
+	cm->db = msg.hdr.db;
+
+	VLOG(2) << "connection: " << client->connection_string() << ", message: " << msg.to_string() <<
+		", refcnt: " << cm->refcnt;
+
+	auto completion = [cm] (connection::pointer, message &) {
+		VLOG(2) << "completeion: refcnt: " << cm->refcnt;
+		if (--cm->refcnt == 0) {
+			message msg;
+			msg.hdr.db = cm->db;
+			msg.hdr.id = cm->id;
+			cm->cn->send_reply(msg);
+		}
+	};
+
 	for (auto &bg: m_bcast) {
 		uint64_t group = bg.first;
 
-		announce_broadcast_group_nolock(group, connected);
+		// we should send all broadcast groups into @client
+		announce_broadcast_group_nolock(group, connection::pointer(), completion);
 	}
+
+	completion(client, msg);
 }
 
 void server::broadcast_client_message(connection::pointer client, message &msg)
@@ -207,10 +240,12 @@ void server::message_handler(connection::pointer client, message &msg)
 		std::unique_lock<std::mutex> guard(m_lock);
 
 		broadcast::create_and_insert(m_bcast, msg.db(), client);
-		auto srv = m_route.find(msg.db());
-		if (srv && !connection_to_self(srv))
-			announce_broadcast_group_nolock(msg.db(), srv);
+		announce_broadcast_group_nolock(msg.db(), client, [msg, client] (connection::pointer, message &reply) mutable {
+							msg.hdr.status = reply.hdr.status;
+							client->send_reply(msg);
+						});
 
+		msg.hdr.flags &= ~SCATTER_FLAGS_NEED_ACK;
 		msg.hdr.status = 0;
 		break;
 	}
@@ -243,7 +278,9 @@ void server::message_handler(connection::pointer client, message &msg)
 			client->set_ids(cids);
 			m_route.add(client);
 
-			announce_broadcast_groups(client);
+			announce_broadcast_groups(client, msg);
+			// ack will be sent after all broadcast groups have been announced
+			msg.hdr.flags &= ~SCATTER_FLAGS_NEED_ACK;
 		} catch (const std::exception &e) {
 			LOG(ERROR) << "connection: " << client->connection_string() <<
 				", message: " << msg.to_string() <<

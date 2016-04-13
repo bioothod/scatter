@@ -38,8 +38,8 @@ private:
 	// checks whether connection (usually obtained from route table) is actually artificially added into route table 'self-connection'
 	bool connection_to_self(connection::pointer cn);
 
-	void announce_broadcast_groups(connection::pointer connected);
-	void announce_broadcast_group_nolock(uint64_t db, connection::pointer connected);
+	void announce_broadcast_groups(connection::pointer client, message &msg);
+	bool announce_broadcast_group_nolock(uint64_t group, connection::pointer client, connection::process_fn_t complete);
 
 	void broadcast_client_message(connection::pointer client, message &msg);
 
