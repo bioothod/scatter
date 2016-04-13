@@ -3,12 +3,16 @@
 #include "scatter/message.hpp"
 #include "scatter/connection.hpp"
 
+#include <set>
+
 namespace ioremap { namespace scatter {
 
 class route {
 public:
 	void add(connection::pointer);
 	void remove(connection::pointer);
+
+	std::set<connection::pointer> connections();
 
 	connection::pointer find(uint64_t);
 

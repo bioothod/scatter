@@ -73,4 +73,15 @@ connection::pointer route::find(uint64_t id)
 	return it->second;
 }
 
+std::set<connection::pointer> route::connections()
+{
+	std::set<connection::pointer> cns;
+	std::lock_guard<std::mutex> guard(m_lock);
+	for (const auto &p : m_connections) {
+		cns.insert(p.second);
+	}
+
+	return cns;
+}
+
 }} // namespace ioremap::scatter
