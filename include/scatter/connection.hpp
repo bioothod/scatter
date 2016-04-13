@@ -46,9 +46,11 @@ public:
 	void start_reading();
 
 	void connect(const resolver_iterator it);
+	void request_remote_nodes(process_fn_t);
 
-	// message has to be already encoded
-	void send(const message &msg, process_fn_t complete);
+	// message should not be encoded
+	// it will be modified, @hdr.trans will be set
+	void send(message &msg, process_fn_t complete);
 
 	// data will be copied into newly created message
 	void send(uint64_t id, uint64_t db, uint64_t flags, int cmd, const char *data, size_t size, process_fn_t complete);
@@ -73,8 +75,10 @@ private:
 	std::string m_remote_string;
 	header m_tmp_hdr;
 
+	std::atomic_long m_transactions;
+
 	typedef struct {
-		uint64_t		id;
+		uint64_t		trans;
 		uint64_t		flags;
 		message::raw_buffer_t	buf;
 		process_fn_t		complete;
@@ -101,7 +105,7 @@ private:
 	void process_message(std::shared_ptr<message> msg);
 
 	// called from @connect() method to obtain ids of the remote node
-	void request_remote_ids();
+	void request_remote_ids(std::promise<int> &p);
 	void parse_remote_ids(std::promise<int> &p, message &msg);
 
 	void set_connection_strings();
