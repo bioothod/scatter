@@ -1,4 +1,5 @@
 #include "scatter/node.hpp"
+#include "scatter/serialize.hpp"
 
 #include <msgpack.hpp>
 
@@ -24,7 +25,52 @@ connection::pointer node::connect(const std::string &addr, typename connection::
 
 	cn->connect(m_resolver.resolve(addr).get());
 	m_route.add(cn);
+	return cn;
 
+	std::promise<int> p;
+	std::future<int> f = p.get_future();
+
+	std::vector<connection::proto::endpoint> eps;
+	cn->request_remote_nodes([&] (connection::pointer, message &msg) {
+				if (msg.hdr.status) {
+					LOG(ERROR) << "connection: " << cn->connection_string() <<
+						", reply: " << msg.to_string() <<
+						", error: could not request remote connections";
+
+					p.set_exception(std::make_exception_ptr(
+							create_error(msg.hdr.status, "connect: could not request remote connections")));
+					return;
+				}
+
+				try {
+					msgpack::unpacked up;
+					msgpack::unpack(&up, msg.data(), msg.hdr.size);
+
+					up.get().convert(&eps);
+					p.set_value(0);
+				} catch (const std::exception &e) {
+					LOG(ERROR) << "connection: " << cn->connection_string() <<
+						", message: " << msg.to_string() <<
+						", error: could not unpack array of endpoints: " << e.what();
+
+					p.set_exception(std::current_exception());
+					return;
+				}
+			});
+
+	f.get();
+
+	for (auto &ep: eps) {
+		if (ep == cn->socket().remote_endpoint())
+			continue;
+
+		auto eps_it = connection::resolver_iterator::create(ep, ep.address().to_string(), std::to_string(ep.port()));
+		connection::pointer c = connection::create(m_io_pool, process,
+				std::bind(&node::drop, this, std::placeholders::_1, std::placeholders::_2));
+
+		c->connect(eps_it);
+		m_route.add(c);
+	}
 	return cn;
 }
 
@@ -58,7 +104,7 @@ void node::drop(connection::pointer cn, const boost::system::error_code &ec)
 	m_route.remove(cn);
 }
 
-// message should be encoded
+// message should not be encoded
 void node::send(message &msg, connection::process_fn_t complete)
 {
 	long db = msg.db();
