@@ -11,8 +11,6 @@ public:
 	broadcast(uint64_t id);
 	broadcast(broadcast &&other);
 
-	~broadcast();
-
 	template <typename C>
 	static void create_and_insert(C &collection, uint64_t id, connection::pointer client) {
 		auto it = collection.find(id);
@@ -27,7 +25,7 @@ public:
 
 	void join(connection::pointer client);
 	void join(connection::pointer client, bool server_connection);
-	void leave(connection::pointer client);
+	void leave(connection::pointer client, connection::process_fn_t complete);
 
 	size_t num_clients() const;
 	size_t num_servers() const;

@@ -1,3 +1,4 @@
+#include "scatter/serialize.hpp"
 #include "scatter/server.hpp"
 
 #include <msgpack.hpp>
@@ -67,22 +68,36 @@ connection::pointer server::connect(const std::string &addr)
 	return srv;
 }
 
-void server::drop_from_broadcast_group(connection::pointer cn)
+void server::drop_from_broadcast_group_nolock(uint64_t group, connection::pointer client, connection::process_fn_t complete)
 {
-	std::vector<uint64_t> remove;
-	std::unique_lock<std::mutex> guard(m_lock);
+	LOG(INFO) << "connection: " << client->connection_string() << ", leaving broadcast group: " << group;
 
-	for (auto &group: m_bcast) {
-		broadcast &bcast = group.second;
-
-		bcast.leave(cn);
-
-		if (!bcast.num_clients())
-			remove.push_back(group.first);
+	auto it = m_bcast.find(group);
+	if (it == m_bcast.end()) {
+		message msg;
+		msg.hdr.db = group;
+		complete(connection::pointer(), msg);
+		return;
 	}
 
-	for (auto id: remove) {
-		m_bcast.erase(id);
+	it->second.leave(client, complete);
+	if (it->second.num_clients() == 0) {
+		m_bcast.erase(it);
+	}
+}
+
+void server::drop_from_broadcast_groups(connection::pointer client)
+{
+	std::unique_lock<std::mutex> guard(m_lock);
+
+	// a little bit awkward way to leave many groups at once
+	std::vector<uint64_t> groups;
+	for (auto &p: m_bcast) {
+		groups.push_back(p.first);
+	}
+
+	for (auto group: groups) {
+		drop_from_broadcast_group_nolock(group, client, [] (connection::pointer, message &) {});
 	}
 }
 
@@ -92,7 +107,7 @@ void server::drop(connection::pointer cn, const boost::system::error_code &ec)
 
 	m_route.remove(cn);
 
-	drop_from_broadcast_group(cn);
+	drop_from_broadcast_groups(cn);
 }
 
 bool server::connection_to_self(connection::pointer cn)
@@ -157,6 +172,7 @@ bool server::announce_broadcast_group_nolock(uint64_t group, connection::pointer
 void server::announce_broadcast_groups(connection::pointer client, message &msg)
 {
 	struct completion {
+		uint64_t trans;
 		uint64_t id;
 		uint64_t db;
 		connection::pointer cn;
@@ -170,17 +186,19 @@ void server::announce_broadcast_groups(connection::pointer client, message &msg)
 	cm->refcnt = m_bcast.size() + 1;
 	cm->id = msg.hdr.id;
 	cm->db = msg.hdr.db;
+	cm->trans = msg.hdr.trans;
 
 	VLOG(2) << "connection: " << client->connection_string() << ", message: " << msg.to_string() <<
 		", refcnt: " << cm->refcnt;
 
 	auto completion = [cm] (connection::pointer, message &) {
-		VLOG(2) << "completeion: refcnt: " << cm->refcnt;
+		VLOG(2) << "completion: refcnt: " << cm->refcnt;
 		if (--cm->refcnt == 0) {
-			message msg;
-			msg.hdr.db = cm->db;
-			msg.hdr.id = cm->id;
-			cm->cn->send_reply(msg);
+			message reply;
+			reply.hdr.db = cm->db;
+			reply.hdr.id = cm->id;
+			reply.hdr.trans = cm->trans;
+			cm->cn->send_reply(reply);
 		}
 	};
 
@@ -250,7 +268,13 @@ void server::message_handler(connection::pointer client, message &msg)
 		break;
 	}
 	case SCATTER_CMD_BCAST_LEAVE: {
-		drop_from_broadcast_group(client);
+		std::unique_lock<std::mutex> guard(m_lock);
+
+		drop_from_broadcast_group_nolock(msg.db(), client, [msg, client] (connection::pointer, message &) {
+							client->send_reply(msg);
+						});
+
+		msg.hdr.flags &= ~SCATTER_FLAGS_NEED_ACK;
 		msg.hdr.status = 0;
 		break;
 	}
@@ -295,6 +319,28 @@ void server::message_handler(connection::pointer client, message &msg)
 	case SCATTER_CMD_SERVER_LEAVE: {
 		m_route.remove(client);
 		msg.hdr.status = 0;
+		break;
+	}
+	case SCATTER_CMD_CONNECTIONS: {
+		auto cns = m_route.connections();
+		std::vector<connection::proto::endpoint> eps;
+		for (auto &cn: cns) {
+			if (!cn || connection_to_self(cn))
+				continue;
+
+			const auto &ep = cn->socket().remote_endpoint();
+			eps.push_back(ep);
+		}
+
+		std::stringstream buffer;
+		msgpack::pack(buffer, eps);
+		std::string rdata(buffer.str());
+
+		client->send(msg.hdr.id, msg.hdr.db, SCATTER_FLAGS_REPLY, SCATTER_CMD_CONNECTIONS, rdata.data(), rdata.size(),
+				[] (connection::pointer, message &) {});
+
+		// server has sent reply, no need to send another one
+		msg.hdr.flags &= ~SCATTER_FLAGS_NEED_ACK;
 		break;
 	}
 	default:

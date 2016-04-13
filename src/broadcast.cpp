@@ -13,19 +13,6 @@ broadcast::broadcast(broadcast &&other)
 {
 }
 
-broadcast::~broadcast()
-{
-	// leave all groups which are connected over server-server connections
-	message msg;
-	msg.hdr.cmd = SCATTER_CMD_BCAST_LEAVE;
-	msg.hdr.db = m_id;
-	msg.encode_header();
-
-	for (auto srv: m_servers) {
-		srv->send(msg, [&] (connection::pointer, message &) {});
-	}
-}
-
 void broadcast::join(connection::pointer client, bool server_connection)
 {
 	std::lock_guard<std::mutex> m_guard(m_lock);
@@ -35,9 +22,12 @@ void broadcast::join(connection::pointer client, bool server_connection)
 	else
 		m_clients.insert(client);
 
-	VLOG(2) << "broadcast: " << m_id <<
-			", connection: " << client->connection_string() <<
-			", command: join";
+	VLOG(1) << "connection: " << client->connection_string() <<
+			", broadcast: " << m_id <<
+			", server_connection: " << server_connection <<
+			", command: join" <<
+			", clients: " << m_clients.size() <<
+			", servers: " << m_servers.size();
 }
 
 void broadcast::join(connection::pointer client)
@@ -45,15 +35,44 @@ void broadcast::join(connection::pointer client)
 	join(client, false);
 }
 
-void broadcast::leave(connection::pointer client)
+void broadcast::leave(connection::pointer client, connection::process_fn_t complete)
 {
 	std::lock_guard<std::mutex> m_guard(m_lock);
-	m_clients.erase(client);
-	m_servers.erase(client);
+	size_t removed_clients = m_clients.erase(client);
+	size_t removed_servers = m_servers.erase(client);
 
-	VLOG(2) << "broadcast: " << m_id <<
-			", connection: " << client->connection_string() <<
-			", command: leave";
+	if (!removed_clients && !removed_servers)
+		return;
+
+	VLOG(1) << "connection: " << client->connection_string() <<
+			", broadcast: " << m_id <<
+			", command: leave" <<
+			", clients: " << m_clients.size() <<
+			", servers: " << m_servers.size();
+
+	// leave all groups which are connected over server-server connections
+	if (m_clients.empty() && (m_servers.size() != 0)) {
+		struct tmp {
+			std::atomic_int refcnt;
+			connection::process_fn_t complete;
+		};
+
+		auto shared(std::make_shared<tmp>());
+		shared->refcnt = m_servers.size();
+		shared->complete = complete;
+
+		for (auto srv: m_servers) {
+			srv->send(0, m_id, SCATTER_FLAGS_NEED_ACK, SCATTER_CMD_BCAST_LEAVE, NULL, 0,
+				[shared, client] (connection::pointer, message &reply) {
+					if (--shared->refcnt == 0) {
+						shared->complete(client, reply);
+					}
+				});
+		}
+	} else {
+		message msg;
+		complete(client, msg);
+	}
 }
 
 void broadcast::send(message &msg, connection::process_fn_t complete)
@@ -80,11 +99,39 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 		std::atomic_int			completed;
 		int				err;
 		connection::process_fn_t	complete;
-
-		tmp(long c, int e, connection::process_fn_t f) : completed(c), err(e), complete(f) {}
+		uint64_t			trans;
+		uint64_t			id;
+		uint64_t			db;
 	};
 
-	auto var(std::make_shared<tmp>(copy.size(), err, complete));
+	auto var(std::make_shared<tmp>());
+	var->complete = complete;
+	var->err = err;
+	var->completed = copy.size();
+	var->trans = msg.hdr.trans;
+	var->id = msg.hdr.id;
+	var->db = msg.hdr.db;
+
+	auto completion = [&, self, var] (connection::pointer fwd, message &reply) {
+		if (--var->completed == 0) {
+			if (!reply.hdr.status) {
+				// clear error if there is at least one successful sending and ack
+				var->err = 0;
+			}
+
+			VLOG(2) << "connection: " << self->connection_string() <<
+				", broadcast connection: " << fwd->connection_string() <<
+				", reply: " << reply.to_string();
+
+			message tmp;
+			tmp.hdr.id = var->id;
+			tmp.hdr.trans = var->trans;
+			tmp.hdr.db = var->db;
+			tmp.hdr.status = var->err;
+			tmp.hdr.flags = SCATTER_FLAGS_REPLY;
+			var->complete(self, tmp);
+		}
+	};
 
 	for (auto &c : copy) {
 		VLOG(1) << "connection: " << self->connection_string() <<
@@ -92,42 +139,14 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 			": message: " << msg.to_string() <<
 			", completed: " << var->completed << "/" << copy.size();
 
-			if (self && (c->socket().local_endpoint() == self->socket().local_endpoint()) &&
-					(c->socket().remote_endpoint() == self->socket().remote_endpoint())) {
-				int cmp = --var->completed;
-
-				VLOG(2) << "connection: " << self->connection_string() <<
-					": message: " << msg.to_string() <<
-					", completed: " << cmp;
-
-				if (cmp == 0) {
-					msg.hdr.status = var->err;
-					var->complete(self, msg);
-					return;
-				}
+			if (self && c && c == self) {
+				completion(self, msg);
 				continue;
 			}
 
-			c->send(msg, [this, self, var] (connection::pointer fwd, message &reply) {
-						if (reply.hdr.status) {
-							leave(fwd);
-						} else {
-							// clear error if there is at least one successful sending and ack
-							var->err = 0;
-						}
-
-						int cmp = --var->completed;
-
-						VLOG(2) << "connection: " << self->connection_string() <<
-							", broadcast connection: " << fwd->connection_string() <<
-							", reply: " << reply.to_string() << ", completed: " << cmp;
-
-						if (cmp == 0) {
-							reply.hdr.status = var->err;
-							var->complete(self, reply);
-							return;
-						}
-					});
+			// we basically copy message here, since its header will be modified (transaction number set),
+			// and this can happen in parallel for different connections
+			c->send(msg.hdr.id, msg.hdr.db, msg.hdr.flags, msg.hdr.cmd, msg.data(), msg.hdr.size, completion);
 	}
 }
 
