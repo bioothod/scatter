@@ -104,9 +104,9 @@ void address::msgpack_unpack(msgpack::object o)
 	p[0].convert(&this->family);
 	const char *data = p[1].via.raw.ptr;
 	int size = p[1].via.raw.size;
-	if ((size > (int)sizeof(data)) || ((family != AF_INET) && (family != AF_INET6))) {
+	if ((size > (int)sizeof(this->data)) || ((family != AF_INET) && (family != AF_INET6))) {
 		ioremap::scatter::throw_error(-EINVAL, "address unpack: family: %d, must be: %d or %d, raw.size: %d, must be less than: %zd",
-				family, AF_INET, AF_INET6, size, sizeof(data));
+				family, AF_INET, AF_INET6, size, sizeof(this->data));
 	}
 	
 	memcpy(this->data, data, size);
