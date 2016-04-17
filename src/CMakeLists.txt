@@ -1,4 +1,5 @@
 add_library(scatter SHARED
+	address.cpp
 	broadcast.cpp
 	connection.cpp
 	exception.cpp
