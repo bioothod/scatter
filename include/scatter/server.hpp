@@ -1,11 +1,20 @@
 #pragma once
 
+#include "scatter/address.hpp"
 #include "scatter/broadcast.hpp"
 #include "scatter/connection.hpp"
 #include "scatter/pool.hpp"
+#include "scatter/resolver.hpp"
 #include "scatter/route.hpp"
 
 namespace ioremap { namespace scatter {
+
+struct join_control {
+	std::vector<connection::cid_t> cids;
+	address addr;
+
+	MSGPACK_DEFINE(cids, addr);
+};
 
 class server {
 public:
@@ -30,6 +39,8 @@ private:
 	connection::proto::socket m_socket;
 
 	route m_route;
+
+	address m_announce_address;
 
 	std::mutex m_lock;
 	std::map<uint64_t, broadcast> m_bcast;

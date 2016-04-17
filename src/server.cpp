@@ -1,4 +1,3 @@
-#include "scatter/serialize.hpp"
 #include "scatter/server.hpp"
 
 #include <msgpack.hpp>
@@ -9,12 +8,14 @@ server::server(const std::string &addr, int io_pool_size)
 	: m_io_pool(io_pool_size)
 	, m_resolver(m_io_pool)
 	, m_acceptor(m_io_pool.get_service(), m_resolver.resolve(addr).get()->endpoint(), true)
-	, m_socket(m_io_pool.get_service())
+	, m_socket(m_io_pool.get_service()),
+	m_announce_address(m_acceptor.local_endpoint())
 {
 	generate_ids();
 
 	auto self = connection::create_empty(m_io_pool);
 	self->set_ids(m_cids);
+	self->set_announce_address(m_announce_address);
 	m_route.add(self);
 
 	schedule_accept();
@@ -117,8 +118,12 @@ bool server::connection_to_self(connection::pointer cn)
 
 void server::join(connection::pointer srv)
 {
+	join_control ctl;
+	ctl.cids = m_cids;
+	ctl.addr = m_announce_address;
+
 	std::stringstream buffer;
-	msgpack::pack(buffer, m_cids);
+	msgpack::pack(buffer, ctl);
 	std::string buf(buffer.str());
 
 	srv->send_blocked_command(m_cids[0], 0, SCATTER_CMD_SERVER_JOIN, buf.data(), buf.size());
@@ -296,10 +301,11 @@ void server::message_handler(connection::pointer client, message &msg)
 			msgpack::unpacked up;
 			msgpack::unpack(&up, msg.data(), msg.hdr.size);
 
-			std::vector<connection::cid_t> cids;
-			up.get().convert(&cids);
+			join_control ctl;
+			up.get().convert(&ctl);
 
-			client->set_ids(cids);
+			client->set_ids(ctl.cids);
+			client->set_announce_address(ctl.addr);
 			m_route.add(client);
 
 			announce_broadcast_groups(client, msg);
@@ -323,17 +329,17 @@ void server::message_handler(connection::pointer client, message &msg)
 	}
 	case SCATTER_CMD_CONNECTIONS: {
 		auto cns = m_route.connections();
-		std::vector<connection::proto::endpoint> eps;
+		std::vector<address> addrs;
 		for (auto &cn: cns) {
 			if (!cn || connection_to_self(cn))
 				continue;
 
-			const auto &ep = cn->socket().remote_endpoint();
-			eps.push_back(ep);
+			const auto &addr = cn->announce_address();
+			addrs.push_back(addr);
 		}
 
 		std::stringstream buffer;
-		msgpack::pack(buffer, eps);
+		msgpack::pack(buffer, addrs);
 		std::string rdata(buffer.str());
 
 		client->send(msg.hdr.id, msg.hdr.db, SCATTER_FLAGS_REPLY, SCATTER_CMD_CONNECTIONS, rdata.data(), rdata.size(),
