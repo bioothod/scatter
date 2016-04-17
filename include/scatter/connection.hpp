@@ -1,8 +1,8 @@
 #pragma once
 
+#include "scatter/address.hpp"
 #include "scatter/message.hpp"
 #include "scatter/pool.hpp"
-#include "scatter/resolver.hpp"
 
 #include <boost/bind.hpp> // must be first among boost headers
 #include <boost/asio.hpp>
@@ -42,6 +42,9 @@ public:
 	std::string remote_string() const;
 	std::string local_string() const;
 
+	void set_announce_address(const address &addr);
+	const address &announce_address() const;
+
 	void close();
 	void start_reading();
 
@@ -76,6 +79,8 @@ private:
 	header m_tmp_hdr;
 
 	std::atomic_long m_transactions;
+
+	address m_announce_address;
 
 	typedef struct {
 		uint64_t		trans;

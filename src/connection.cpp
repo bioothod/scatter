@@ -71,6 +71,7 @@ void connection::connect(const connection::resolver_iterator it)
 	std::promise<int> p;
 	std::future<int> f = p.get_future();
 
+	LOG(INFO) << "connecting: " << it->endpoint().address().to_string().c_str() << ":" << it->endpoint().port();
 	auto self(shared_from_this());
 	boost::asio::async_connect(m_socket, it,
 			[this, self, &p, &it] (const boost::system::error_code &ec, const connection::resolver_iterator res) {
@@ -360,6 +361,8 @@ void connection::set_connection_strings()
 			std::to_string(m_socket.local_endpoint().port()) + ":" + fam;
 	m_remote_string = m_socket.remote_endpoint().address().to_string() + ":" +
 			std::to_string(m_socket.remote_endpoint().port()) + ":" + fam;
+
+	set_announce_address(address(m_socket.remote_endpoint()));
 }
 
 void connection::request_remote_nodes(process_fn_t complete)
@@ -370,6 +373,15 @@ void connection::request_remote_nodes(process_fn_t complete)
 	msg.hdr.flags = SCATTER_FLAGS_NEED_ACK;
 
 	send(msg, complete);
+}
+
+void connection::set_announce_address(const address &addr)
+{
+	m_announce_address = addr;
+}
+const address &connection::announce_address() const
+{
+	return m_announce_address;
 }
 
 }} // namespace ioremap::scatter
