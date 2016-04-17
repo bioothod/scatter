@@ -46,13 +46,17 @@ TEST_F(stest, route)
 	node c;
 
 	c.connect(m_addr1, [&] (connection::pointer, message &) {});
-	auto cn = c.get_connection(123);
+	auto cn = c.get_connection(90);
 	ASSERT_NE(cn.use_count(), 0);
 	ASSERT_EQ(cn->remote_string(), m_addr1);
 
+	cn = c.get_connection(123);
+	ASSERT_NE(cn.use_count(), 0);
+	ASSERT_EQ(cn->remote_string(), m_addr2);
+
 	cn = c.get_connection(1000000);
 	ASSERT_NE(cn.use_count(), 0);
-	ASSERT_EQ(cn->remote_string(), m_addr1);
+	ASSERT_EQ(cn->remote_string(), m_addr2);
 
 	c.connect(m_addr2, [&] (connection::pointer, message &) {});
 	cn = c.get_connection(123);
@@ -453,17 +457,17 @@ TEST_F(stest, leave_broadcast_groups)
 
 	c2.connect(m_addr1, [&] (connection::pointer, message &) {});
 	c2.bcast_join(db);
-	ASSERT_EQ(m_s1.test_bcast_num_connections(db, false), 2);
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, false), 1);
 	ASSERT_EQ(m_s1.test_bcast_num_connections(db, true), 1);
-	ASSERT_EQ(m_s2.test_bcast_num_connections(db, false), 1);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, false), 2);
 	ASSERT_EQ(m_s2.test_bcast_num_connections(db, true), 0);
 
 	c3.connect(m_addr1, [&] (connection::pointer, message &) {});
 	c3.connect(m_addr2, [&] (connection::pointer, message &) {});
 	c3.bcast_join(db);
-	ASSERT_EQ(m_s1.test_bcast_num_connections(db, false), 2);
+	ASSERT_EQ(m_s1.test_bcast_num_connections(db, false), 1);
 	ASSERT_EQ(m_s1.test_bcast_num_connections(db, true), 1);
-	ASSERT_EQ(m_s2.test_bcast_num_connections(db, false), 2);
+	ASSERT_EQ(m_s2.test_bcast_num_connections(db, false), 3);
 	ASSERT_EQ(m_s2.test_bcast_num_connections(db, true), 0);
 
 	c1.bcast_leave(db);
