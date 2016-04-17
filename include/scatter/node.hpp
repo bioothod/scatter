@@ -1,6 +1,7 @@
 #pragma once
 
 #include "scatter/connection.hpp"
+#include "scatter/resolver.hpp"
 #include "scatter/route.hpp"
 #include "scatter/server.hpp"
 
@@ -26,7 +27,7 @@ public:
 
 private:
 	io_service_pool m_io_pool;
-	resolver<> m_resolver;
+	resolver<connection::proto> m_resolver;
 
 	uint64_t m_id;
 	route m_route;

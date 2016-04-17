@@ -18,19 +18,20 @@ node::~node()
 	m_io_pool.stop();
 }
 
-connection::pointer node::connect(const std::string &addr, typename connection::process_fn_t process)
+connection::pointer node::connect(const std::string &addr_str, typename connection::process_fn_t process)
 {
 	connection::pointer cn = connection::create(m_io_pool, process,
 			std::bind(&node::drop, this, std::placeholders::_1, std::placeholders::_2));
 
-	cn->connect(m_resolver.resolve(addr).get());
+	auto it = m_resolver.resolve(addr_str).get();
+
+	cn->connect(it);
 	m_route.add(cn);
-	return cn;
 
 	std::promise<int> p;
 	std::future<int> f = p.get_future();
 
-	std::vector<connection::proto::endpoint> eps;
+	std::vector<address> addrs;
 	cn->request_remote_nodes([&] (connection::pointer, message &msg) {
 				if (msg.hdr.status) {
 					LOG(ERROR) << "connection: " << cn->connection_string() <<
@@ -46,7 +47,7 @@ connection::pointer node::connect(const std::string &addr, typename connection::
 					msgpack::unpacked up;
 					msgpack::unpack(&up, msg.data(), msg.hdr.size);
 
-					up.get().convert(&eps);
+					up.get().convert(&addrs);
 					p.set_value(0);
 				} catch (const std::exception &e) {
 					LOG(ERROR) << "connection: " << cn->connection_string() <<
@@ -60,11 +61,12 @@ connection::pointer node::connect(const std::string &addr, typename connection::
 
 	f.get();
 
-	for (auto &ep: eps) {
-		if (ep == cn->socket().remote_endpoint())
+	for (auto &addr: addrs) {
+		LOG(INFO) << "received address: " << addr.to_string();
+		if (addr.endpoint() == cn->socket().remote_endpoint())
 			continue;
 
-		auto eps_it = connection::resolver_iterator::create(ep, ep.address().to_string(), std::to_string(ep.port()));
+		auto eps_it = connection::resolver_iterator::create(addr.endpoint(), addr.host(), std::to_string(addr.port()));
 		connection::pointer c = connection::create(m_io_pool, process,
 				std::bind(&node::drop, this, std::placeholders::_1, std::placeholders::_2));
 
