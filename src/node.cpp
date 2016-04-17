@@ -1,5 +1,4 @@
 #include "scatter/node.hpp"
-#include "scatter/serialize.hpp"
 
 #include <msgpack.hpp>
 
