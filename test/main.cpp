@@ -490,7 +490,6 @@ TEST_F(stest, bcast_one_to_one_bidirectional_different_servers)
 	std::vector<connection::cid_t> ids2 = {100, 600};
 
 	set_ids(ids1, ids2);
-	connect_servers();
 
 	node c1, c2, c3;
 	uint64_t db = 123;
@@ -519,6 +518,8 @@ TEST_F(stest, bcast_one_to_one_bidirectional_different_servers)
 					c2_counter++;
 			});
 	c2.bcast_join(db);
+
+	connect_servers();
 
 	int n = 10000;
 	for (int i = 0; i < n; ++i) {
