@@ -8,7 +8,7 @@ Build-Depends:
  libboost-program-options-dev | libboost-program-options1.48-dev,
  libmsgpack-dev,
  libgtest-dev,
- libglog-dev
+ libglog-dev | libgoogle-glog-dev
 Standards-Version: 3.9.1
 Section: libs
 Vcs-Git: git://github.com/bioothod/scatter.git
