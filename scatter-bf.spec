@@ -10,7 +10,7 @@ Source0:	%{name}-%{version}.tar.bz2
 BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 
 BuildRequires:	boost-devel, boost-system, boost-thread, boost-program-options
-BuildRequires:  cmake, msgpack-devel, gtest-devel, glog-devel
+BuildRequires:  cmake, msgpack-devel, glog-devel
 
 %global debug_package %{nil}
 
