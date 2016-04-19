@@ -30,7 +30,7 @@ public:
 	// that route info hasn't been sent to remote nodes yet
 	void test_set_ids(const std::vector<connection::cid_t> &cids);
 	std::vector<connection::cid_t> test_ids() const;
-	size_t test_bcast_num_connections(uint64_t db, bool server);
+	int test_bcast_num_connections(uint64_t db, bool server);
 
 private:
 	io_service_pool m_io_pool;

@@ -368,9 +368,9 @@ std::vector<connection::cid_t> server::test_ids() const
 {
 	return m_cids;
 }
-size_t server::test_bcast_num_connections(uint64_t db, bool server)
+int server::test_bcast_num_connections(uint64_t db, bool server)
 {
-	size_t num = 0;
+	int num = 0;
 	std::unique_lock<std::mutex> guard(m_lock);
 	auto it = m_bcast.find(db);
 	if (it != m_bcast.end()) {
