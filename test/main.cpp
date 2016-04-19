@@ -1,4 +1,5 @@
 #include "scatter/node.hpp"
+#include "scatter/server.hpp"
 
 #include <gtest/gtest.h>
 
@@ -83,22 +84,22 @@ TEST_F(stest, bcast_one_to_one)
 	std::mutex lock;
 	std::condition_variable cv;
 
-	std::atomic_int c1_counter(0), c1_completed(0);
+	std::atomic_ulong c1_counter(0), c1_completed(0);
 	c1.connect(m_addr1, [&] (connection::pointer, message &) {
 					c1_counter++;
 			});
 	c1.bcast_join(db);
 
-	std::atomic_int c2_counter(0);
+	std::atomic_ulong c2_counter(0);
 	c2.connect(m_addr1, [&] (connection::pointer, message &) {
 					c2_counter++;
 			});
 	c2.bcast_join(db);
 
-	int c1_bias = 10000;
+	uint64_t c1_bias = 10000;
 
-	int n = 10000;
-	for (int i = 0; i < n; ++i) {
+	uint64_t n = 10000;
+	for (uint64_t i = 0; i < n; ++i) {
 		message msg;
 		msg.hdr.id = c1_bias + i;
 		msg.hdr.db = db;
@@ -136,23 +137,23 @@ TEST_F(stest, bcast_one_to_one_bidirectional)
 	std::mutex lock;
 	std::condition_variable cv1, cv2;
 
-	std::atomic_int c1_counter(0), c1_completed(0);
+	std::atomic_ulong c1_counter(0), c1_completed(0);
 	c1.connect(m_addr1, [&] (connection::pointer, message &) {
 					c1_counter++;
 			});
 	c1.bcast_join(db);
 
-	std::atomic_int c2_counter(0), c2_completed(0);
+	std::atomic_ulong c2_counter(0), c2_completed(0);
 	c2.connect(m_addr1, [&] (connection::pointer, message &) {
 					c2_counter++;
 			});
 	c2.bcast_join(db);
 
-	int c1_bias = 10000;
-	int c2_bias = 30000;
+	uint64_t c1_bias = 10000;
+	uint64_t c2_bias = 30000;
 
-	int n = 10000;
-	for (int i = 0; i < n; ++i) {
+	uint64_t n = 10000;
+	for (uint64_t i = 0; i < n; ++i) {
 		message msg;
 		msg.hdr.id = c1_bias + i;
 		msg.hdr.db = db;
@@ -210,28 +211,28 @@ TEST_F(stest, bcast_one_to_many)
 	std::mutex lock;
 	std::condition_variable cv1, cv2;
 
-	std::atomic_int c1_counter(0), c1_completed(0);
+	std::atomic_ulong c1_counter(0), c1_completed(0);
 	c1.connect(m_addr1, [&] (connection::pointer, message &) {
 					c1_counter++;
 			});
 	c1.bcast_join(db);
 
-	std::atomic_int c2_counter(0), c2_completed(0);
+	std::atomic_ulong c2_counter(0), c2_completed(0);
 	c2.connect(m_addr1, [&] (connection::pointer, message &) {
 					c2_counter++;
 			});
 	c2.bcast_join(db);
 
-	std::atomic_int c3_counter(0), c3_completed(0);
+	std::atomic_ulong c3_counter(0), c3_completed(0);
 	c3.connect(m_addr1, [&] (connection::pointer, message &) {
 					c3_counter++;
 			});
 	c3.bcast_join(db);
 
-	int c1_bias = 10000;
+	uint64_t c1_bias = 10000;
 
-	int n = 10000;
-	for (int i = 0; i < n; ++i) {
+	uint64_t n = 10000;
+	for (uint64_t i = 0; i < n; ++i) {
 		message msg;
 		msg.hdr.id = c1_bias + i;
 		msg.hdr.db = db;
@@ -270,29 +271,29 @@ TEST_F(stest, bcast_many_to_many)
 	std::mutex lock;
 	std::condition_variable cv1, cv2;
 
-	std::atomic_int c1_counter(0), c1_completed(0);
+	std::atomic_ulong c1_counter(0), c1_completed(0);
 	c1.connect(m_addr1, [&] (connection::pointer, message &) {
 					c1_counter++;
 			});
 	c1.bcast_join(db);
 
-	std::atomic_int c2_counter(0), c2_completed(0);
+	std::atomic_ulong c2_counter(0), c2_completed(0);
 	c2.connect(m_addr1, [&] (connection::pointer, message &) {
 					c2_counter++;
 			});
 	c2.bcast_join(db);
 
-	std::atomic_int c3_counter(0), c3_completed(0);
+	std::atomic_ulong c3_counter(0), c3_completed(0);
 	c3.connect(m_addr1, [&] (connection::pointer, message &) {
 					c3_counter++;
 			});
 	c3.bcast_join(db);
 
-	int c1_bias = 10000;
-	int c2_bias = 30000;
+	uint64_t c1_bias = 10000;
+	uint64_t c2_bias = 30000;
 
-	int n = 10000;
-	for (int i = 0; i < n; ++i) {
+	uint64_t n = 10000;
+	for (uint64_t i = 0; i < n; ++i) {
 		message msg;
 		msg.hdr.id = c1_bias + i;
 		msg.hdr.db = db;
@@ -350,7 +351,7 @@ TEST_F(stest, route_table_update)
 	std::mutex lock;
 	std::condition_variable cv1, cv2;
 
-	std::atomic_int c1_counter(0), c1_completed(0);
+	std::atomic_ulong c1_counter(0), c1_completed(0);
 	c1.connect(m_addr1, [&] (connection::pointer, message &) {
 					c1_counter++;
 			});
@@ -358,13 +359,13 @@ TEST_F(stest, route_table_update)
 
 	connect_servers();
 
-	std::atomic_int c2_counter(0), c2_completed(0);
+	std::atomic_ulong c2_counter(0), c2_completed(0);
 	c2.connect(m_addr1, [&] (connection::pointer, message &) {
 					c2_counter++;
 			});
 	c2.bcast_join(db);
 
-	std::atomic_int c3_counter(0), c3_completed(0);
+	std::atomic_ulong c3_counter(0), c3_completed(0);
 	c3.connect(m_addr1, [&] (connection::pointer, message &) {
 					c3_counter++;
 			});
@@ -376,11 +377,11 @@ TEST_F(stest, route_table_update)
 	ASSERT_NE(cn.use_count(), 0);
 	ASSERT_EQ(cn->remote_string(), m_addr2);
 
-	int c1_bias = 10000;
-	int c2_bias = 30000;
+	uint64_t c1_bias = 10000;
+	uint64_t c2_bias = 30000;
 
-	int n = 10000;
-	for (int i = 0; i < n; ++i) {
+	uint64_t n = 10000;
+	for (uint64_t i = 0; i < n; ++i) {
 		message msg;
 		msg.hdr.id = c1_bias + i;
 		msg.hdr.db = db;
@@ -494,14 +495,14 @@ TEST_F(stest, bcast_one_to_one_bidirectional_different_servers)
 	node c1, c2, c3;
 	uint64_t db = 123;
 
-	int c1_bias = 10000;
-	int c2_bias = 30000;
+	uint64_t c1_bias = 10000;
+	uint64_t c2_bias = 30000;
 
 
 	std::mutex lock;
 	std::condition_variable cv1, cv2;
 
-	std::atomic_int c1_counter(0), c1_completed(0);
+	std::atomic_ulong c1_counter(0), c1_completed(0);
 	c1.connect(m_addr1, [&] (connection::pointer cn, message &msg) {
 					VLOG(2) << "connection: " << cn->connection_string() <<
 						", client1 received message: " << msg.to_string();
@@ -510,7 +511,7 @@ TEST_F(stest, bcast_one_to_one_bidirectional_different_servers)
 			});
 	c1.bcast_join(db);
 
-	std::atomic_int c2_counter(0), c2_completed(0);
+	std::atomic_ulong c2_counter(0), c2_completed(0);
 	c2.connect(m_addr2, [&] (connection::pointer cn, message &msg) {
 					VLOG(2) << "connection: " << cn->connection_string() <<
 						", client2 received message: " << msg.to_string();
@@ -521,8 +522,8 @@ TEST_F(stest, bcast_one_to_one_bidirectional_different_servers)
 
 	connect_servers();
 
-	int n = 10000;
-	for (int i = 0; i < n; ++i) {
+	uint64_t n = 10000;
+	for (uint64_t i = 0; i < n; ++i) {
 		message msg;
 		msg.hdr.id = c1_bias + i;
 		msg.hdr.db = db;

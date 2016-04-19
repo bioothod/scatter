@@ -1,4 +1,5 @@
 #include "scatter/map.hpp"
+#include "scatter/server.hpp"
 
 #include <gtest/gtest.h>
 
@@ -73,20 +74,19 @@ TEST_F(dmap_test, insert)
 	l.unlock();
 
 	ASSERT_EQ(c1_completed, num);
-	ASSERT_EQ(keys1.size(), num);
+	ASSERT_EQ((int)keys1.size(), num);
 
 	l.lock();
 	cv2.wait_for(l, std::chrono::seconds(10), [&] {return c2_completed == num;});
 	l.unlock();
 
 	ASSERT_EQ(c2_completed, num);
-	ASSERT_EQ(keys2.size(), num);
-
+	ASSERT_EQ((int)keys2.size(), num);
 
 	for (int i = 0; i < num; ++i) {
 		auto &kp = keys1[i];
 		auto vec = c1.find(kp.key);
-		ASSERT_EQ(vec.size(), 2);
+		ASSERT_EQ((int)vec.size(), 2);
 
 		int found = 0;
 		for (auto &v: vec) {
@@ -101,7 +101,7 @@ TEST_F(dmap_test, insert)
 			}
 		}
 
-		ASSERT_EQ(found, vec.size());
+		ASSERT_EQ(found, (int)vec.size());
 	}
 }
 
