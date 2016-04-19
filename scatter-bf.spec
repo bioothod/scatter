@@ -3,7 +3,7 @@ Name:		scatter
 Version:	0.1.1
 Release:	1%{?dist}
 
-License:	GPL 2+
+License:	LGPL 3.0
 Group: 		Development/Libraries
 URL:		https://github.com/bioothod/scatter
 Source0:	%{name}-%{version}.tar.bz2

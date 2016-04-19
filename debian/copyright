@@ -1,6 +1,5 @@
 Copyright (c) 2016+, Evgeniy Polyakov <zbr@ioremap.net>
 All rights reserved.
 
-License: GPL-2+
- The full text of the GPL is distributed in
- /usr/share/common-licenses/GPL-2 on Debian systems.
+License: LGPL-3.0
+ The full text of the GPL is distributed in the root source directory
