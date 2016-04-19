@@ -1,3 +1,11 @@
+scatter (0.1.1) unstable; urgency=low
+
+  * Added all connect/join logic
+  * Implemented simple distribute map
+  * Tests
+
+ -- Evgeniy Polyakov <zbr@ioremap.net>  Tue, 19 Apr 2016 16:29:51 +0400
+
 scatter (0.0.1) unstable; urgency=low
 
   * Initial commit

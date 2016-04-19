@@ -1,6 +1,6 @@
 Summary:	scatter - distributed messaging framework
 Name:		scatter
-Version:	0.1.0
+Version:	0.1.1
 Release:	1%{?dist}
 
 License:	GPL 2+
@@ -64,6 +64,11 @@ rm -rf %{buildroot}
 %{_libdir}/*.so
 
 %changelog
+* Tue Apr 19 2016 Evgeniy Polyakov <zbr@ioremap.net> - 0.1.1
+- Added all connect/join logic
+- Implemented simple distribute map
+- Tests
+
 * Tue Apr 19 2016 Evgeniy Polyakov <zbr@ioremap.net> - 0.1.0
 - Initial commit
 
