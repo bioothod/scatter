@@ -3,7 +3,6 @@
 #include "scatter/connection.hpp"
 #include "scatter/resolver.hpp"
 #include "scatter/route.hpp"
-#include "scatter/server.hpp"
 
 namespace ioremap { namespace scatter {
 
