@@ -25,6 +25,8 @@ public:
 	// message should be encoded
 	void send(message &msg, connection::process_fn_t complete);
 
+	uint64_t id() const;
+
 private:
 	io_service_pool m_io_pool;
 	resolver<connection::proto> m_resolver;

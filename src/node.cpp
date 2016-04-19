@@ -128,4 +128,9 @@ connection::pointer node::get_connection(uint64_t db)
 	return m_route.find(db);
 }
 
+uint64_t node::id() const
+{
+	return m_id;
+}
+
 }} // namespace ioremap::scatter
