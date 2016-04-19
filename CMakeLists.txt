@@ -9,8 +9,8 @@ file(READ "${CMAKE_CURRENT_SOURCE_DIR}/debian/changelog" DEBCHANGELOG)
 # scatter major 0
 # scatter minor 3.12
 string(REGEX MATCH "([0-9]+\\.[0-9]+\\.[0-9]+)" DEBFULLVERSION "${DEBCHANGELOG}")
-string(REGEX MATCH "([0-9]+)" EBUCKET_VERSION_MAJOR "${DEBFULLVERSION}")
-string(REGEX MATCH "([0-9]+\\.[0-9]+$)" EBUCKET_VERSION_MINOR "${DEBFULLVERSION}")
+string(REGEX MATCH "([0-9]+)" SCATTER_VERSION_MAJOR "${DEBFULLVERSION}")
+string(REGEX MATCH "([0-9]+\\.[0-9]+$)" SCATTER_VERSION_MINOR "${DEBFULLVERSION}")
 
 include(TestBigEndian)
 include(cmake/locate_library.cmake)
@@ -47,9 +47,20 @@ link_directories(
 	${MSGPACK_LIBRARY_DIRS}
 )
 
+file(GLOB headers "${CMAKE_CURRENT_SOURCE_DIR}/include/scatter/*.hpp")
+install(FILES ${headers} DESTINATION include/scatter)
+
+get_property(LIB64 GLOBAL PROPERTY FIND_LIBRARY_USE_LIB64_PATHS)
+if ("${LIB64}" STREQUAL "TRUE")
+    set(LIB_SUFFIX 64)
+else()
+    set(LIB_SUFFIX "")
+endif()
+
+set(INSTALL_LIB_DIR lib${LIB_SUFFIX} CACHE PATH "Installation directory for libraries")
+mark_as_advanced(INSTALL_LIB_DIR)
+
 add_subdirectory(src)
 add_subdirectory(test)
 add_subdirectory(example)
 
-file(GLOB headers "${CMAKE_CURRENT_SOURCE_DIR}/include/scatter/*.hpp")
-install(FILES ${headers} DESTINATION include/scatter)
