@@ -1,0 +1,38 @@
+Source: scatter
+Priority: extra
+Maintainer: Evgeniy Polyakov <zbr@ioremap.net>
+Build-Depends:
+ debhelper (>= 7), cmake, cdbs,
+ libboost-dev | libboost1.48-dev, 
+ libboost-thread-dev | libboost-thread1.48-dev, 
+ libboost-program-options-dev | libboost-program-options1.48-dev,
+ libmsgpack-dev,
+ libgtest-dev,
+ libglog-dev
+Standards-Version: 3.9.1
+Section: libs
+Vcs-Git: git://github.com/bioothod/scatter.git
+Vcs-Browser: https://github.com/bioothod/scatter.git
+Homepage: https://github.com/bioothod/scatter.git
+
+Package: scatter
+Section: libdevel
+Architecture: any
+Description: distributed messaging framework
+ Scatter allows to easily write p2p, client-server and server-server messaging systems.
+ Servers are organized into DHT-like ring with dynamic route table, new servers take load
+ from older ones, clients automatically detect new servers and reconnect.
+ Client joins broadcast groups on servers similar to how multicast groups are formed.
+ Servers are stateless, they only maintain global route table and forward requests to
+ servers which have to handle given request according to current route table snapshot.
+
+Package: scatter-dev
+Section: libdevel
+Architecture: any
+Description: distributed messaging framework, development files
+ Scatter allows to easily write p2p, client-server and server-server messaging systems.
+ Servers are organized into DHT-like ring with dynamic route table, new servers take load
+ from older ones, clients automatically detect new servers and reconnect.
+ Client joins broadcast groups on servers similar to how multicast groups are formed.
+ Servers are stateless, they only maintain global route table and forward requests to
+ servers which have to handle given request according to current route table snapshot.
