@@ -26,7 +26,6 @@ public:
 		msg.hdr.id = 123456;
 		msg.hdr.size = s.size() + 1;
 		msg.append(s.c_str(), s.size() + 1);
-		msg.encode_header();
 
 		m_node.send(msg, complete);
 	}
