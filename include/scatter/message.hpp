@@ -60,6 +60,7 @@ public:
 		header_size = sizeof(header)
 	};
 
+	~message();
 	message();
 	message(size_t size);
 	message(std::shared_ptr<std::vector<char>> raw_buffer);

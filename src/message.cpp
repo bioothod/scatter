@@ -96,6 +96,9 @@ bool message::encode_header()
 	convert_header((header *)buffer());
 	return true;
 }
+message::~message()
+{
+}
 
 uint64_t message::trans() const
 {
