@@ -1,5 +1,9 @@
 #include "scatter/address.hpp"
 
+#include <glog/logging.h>
+
+#include <iomanip>
+
 namespace ioremap { namespace scatter {
 
 address::address()
@@ -18,6 +22,7 @@ address::address(const boost::asio::ip::address &addr, int port) : address()
 		auto bytes = addr.to_v4().to_bytes();
 
 		struct sockaddr_in *in = (struct sockaddr_in *)data;
+		in->sin_family = family;
 		in->sin_port = htons(port);
 		memcpy(&in->sin_addr, bytes.data(), sizeof(in->sin_addr));
 	} else {
@@ -27,6 +32,7 @@ address::address(const boost::asio::ip::address &addr, int port) : address()
 		auto bytes = addr.to_v6().to_bytes();
 
 		struct sockaddr_in6 *in6 = (struct sockaddr_in6 *)data;
+		in6->sin6_family = family;
 		in6->sin6_port = htons(port);
 		memcpy(&in6->sin6_addr, bytes.data(), sizeof(in6->sin6_addr));
 	}
@@ -102,15 +108,24 @@ void address::msgpack_unpack(msgpack::object o)
 
 	msgpack::object *p = o.via.array.ptr;
 	p[0].convert(&this->family);
-	const char *data = p[1].via.raw.ptr;
-	int size = p[1].via.raw.size;
-	if ((size > (int)sizeof(this->data)) || ((family != AF_INET) && (family != AF_INET6))) {
+	const char *d = p[1].via.raw.ptr;
+	int s = p[1].via.raw.size;
+	if ((s > (int)sizeof(this->data)) || ((family != AF_INET) && (family != AF_INET6))) {
 		ioremap::scatter::throw_error(-EINVAL, "address unpack: family: %d, must be: %d or %d, raw.size: %d, must be less than: %zd",
-				family, AF_INET, AF_INET6, size, sizeof(this->data));
+				family, AF_INET, AF_INET6, s, sizeof(this->data));
+	}
+
+	if (VLOG_IS_ON(3)) {
+		std::ostringstream ss;
+		ss << std::hex << std::setfill('0');
+		for (int i = 0; i < s; ++i) {
+			ss << std::setw(2) << static_cast<unsigned>(d[i]);
+		}
+		VLOG(3) << "unpack size: " << s << ", data: " << ss.str();
 	}
 	
-	memcpy(this->data, data, size);
-	this->size = size;
+	memcpy(this->data, d, s);
+	this->size = s;
 }
 
 }} // namespace ioremap::scatter
