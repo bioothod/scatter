@@ -19,6 +19,7 @@ LOCATE_LIBRARY(MSGPACK "msgpack.hpp" "msgpack")
 LOCATE_LIBRARY(GLOG "glog/logging.h" "glog")
 
 find_package(Boost COMPONENTS system thread program_options REQUIRED)
+find_package(Ribosome REQUIRED)
 #find_package(Elliptics REQUIRED)
 
 # Test endianness
@@ -74,11 +75,13 @@ include_directories(
 	${GLOG_INCLUDE_DIRS}
 	${GTEST_INCLUDE_DIRS}
 	${MSGPACK_INCLUDE_DIRS}
+	${RIBOSOME_INCLUDE_DIRS}
 )
 
 link_directories(
 	${GLOG_LIBRARY_DIRS}
 	${MSGPACK_LIBRARY_DIRS}
+	${RIBOSOME_LIBRARY_DIRS}
 )
 
 file(GLOB headers "${CMAKE_CURRENT_SOURCE_DIR}/include/scatter/*.hpp")

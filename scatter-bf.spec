@@ -11,6 +11,7 @@ BuildRoot:	%{_tmppath}/%{name}-%{version}-%{release}-root-%(%{__id_u} -n)
 
 BuildRequires:	boost-devel, boost-system, boost-thread, boost-program-options
 BuildRequires:  cmake, msgpack-devel, glog-devel
+BuildRequires:	ribosome-devel
 
 %global debug_package %{nil}
 
