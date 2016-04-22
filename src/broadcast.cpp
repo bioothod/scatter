@@ -91,44 +91,50 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 	copy.insert(copy.end(), m_servers.begin(), m_servers.end());
 	guard.unlock();
 
-	int err = -ENOENT;
-	if (copy.size() == 1)
-		err = 0;
-
 	struct tmp {
 		std::atomic_int			completed;
-		int				err;
 		connection::process_fn_t	complete;
 		uint64_t			trans;
 		uint64_t			id;
 		uint64_t			db;
+		int				cmd;
+		std::vector<int>		errors;
 	};
 
 	auto var(std::make_shared<tmp>());
 	var->complete = complete;
-	var->err = err;
 	var->completed = copy.size();
 	var->trans = msg.hdr.trans;
 	var->id = msg.hdr.id;
 	var->db = msg.hdr.db;
+	var->cmd = msg.hdr.cmd;
 
 	auto completion = [&, self, var] (connection::pointer fwd, message &reply) {
-		if (--var->completed == 0) {
-			if (!reply.hdr.status) {
-				// clear error if there is at least one successful sending and ack
-				var->err = 0;
-			}
+		if (fwd != self)
+			var->errors.push_back(reply.hdr.status);
 
+		if (--var->completed == 0) {
 			VLOG(2) << "connection: " << self->connection_string() <<
 				", broadcast connection: " << fwd->connection_string() <<
 				", reply: " << reply.to_string();
 
 			message tmp;
+			tmp.hdr.cmd = var->cmd;
 			tmp.hdr.id = var->id;
 			tmp.hdr.trans = var->trans;
 			tmp.hdr.db = var->db;
-			tmp.hdr.status = var->err;
 			tmp.hdr.flags = SCATTER_FLAGS_REPLY;
+			tmp.hdr.status = 0;
+
+			for (auto err: var->errors) {
+				if (!err) {
+					// return success (0 status) if there was at least one successful write
+					tmp.hdr.status = err;
+					break;
+				}
+
+				tmp.hdr.status = err;
+			}
 			var->complete(self, tmp);
 		}
 	};
@@ -145,7 +151,7 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 			}
 
 			// we basically copy message here, since its header will be modified (transaction number set),
-			// and this can happen in parallel for different connections
+			/// and this can happen in parallel for different connections
 			c->send(msg.hdr.id, msg.hdr.db, msg.hdr.flags, msg.hdr.cmd, msg.data(), msg.hdr.size, completion);
 	}
 }
