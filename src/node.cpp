@@ -7,6 +7,7 @@ namespace ioremap { namespace scatter {
 node::node(int io_pool_size)
 	: m_io_pool(io_pool_size)
 	, m_resolver(m_io_pool)
+	, m_id(rand())
 {
 }
 node::node() : node(1)
