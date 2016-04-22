@@ -14,6 +14,7 @@ target_link_libraries(scatter
 	${Boost_LIBRARIES}
 	${GLOG_LIBRARIES}
 	${MSGPACK_LIBRARIES}
+	${RIBOSOME_LIBRARIES}
 )
 set_target_properties(scatter PROPERTIES
 	VERSION ${DEBFULLVERSION}
