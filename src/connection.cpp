@@ -138,15 +138,16 @@ void connection::parse_remote_ids(std::promise<int> &p, message &msg)
 
 void connection::send(message &msg, connection::process_fn_t complete)
 {
-	auto buf = msg.raw_buffer();
-
 	if (msg.hdr.trans == 0)
 		msg.hdr.trans = ++m_transactions;
 	msg.encode_header();
 
 	VLOG(2) << "connection: " << connection_string() << ", sending data: " << msg.to_string();
 
-	m_strand.post(std::bind(&connection::strand_write_callback, this, msg.trans(), msg.flags(), buf, complete));
+	std::shared_ptr<connection::completion_t> c = std::make_shared<connection::completion_t>(msg, complete);
+
+	// msg is copied, but it is not very expensive, since data is a shared pointer
+	m_strand.post(std::bind(&connection::strand_write_callback, this, c));
 }
 
 void connection::send(uint64_t id, uint64_t db, uint64_t flags, int cmd, const char *data, size_t size, connection::process_fn_t complete)
@@ -206,23 +207,32 @@ void connection::send_blocked_command(uint64_t id, uint64_t db, int cmd, const c
 }
 
 
-void connection::strand_write_callback(uint64_t trans, uint64_t flags, message::raw_buffer_t buf, connection::process_fn_t complete)
+void connection::strand_write_callback(shared_completion_t c)
 {
-	std::shared_ptr<connection::completion_t> c = std::make_shared<connection::completion_t>();
-	c->trans = trans;
-	c->flags = flags;
-	c->buf = buf;
-	c->complete = complete;
-
 	std::unique_lock<std::mutex> guard(m_lock);
 	m_outgoing.push_back(c);
 
 	// only put request messages which require acknowledge into the map
-	if (flags & SCATTER_FLAGS_NEED_ACK) {
-		m_sent[trans] = c;
+	if (c->copy.hdr.flags & SCATTER_FLAGS_NEED_ACK) {
+		m_sent[c->copy.hdr.trans] = c;
+
+		auto time = std::chrono::system_clock::now() + std::chrono::seconds(10);
+		auto self(shared_from_this());
+		c->expiration_token = m_expire.insert(time, [self, c] () {
+					VLOG(2) << "connection: " << self->connection_string() <<
+						", message: " << c->copy.to_string() <<
+						", expired";
+
+					c->copy.hdr.status = -ETIMEDOUT;
+					c->copy.hdr.size = 0;
+					c->copy.hdr.flags = SCATTER_FLAGS_REPLY;
+
+					self->process_reply(c->copy);
+				});
 
 		VLOG(2) << "connection: " << connection_string() <<
-			", trans: " << trans <<
+			", message: " << c->copy.to_string() <<
+			", expiration_token: " << c->expiration_token <<
 			", added completion callback";
 	}
 
@@ -231,7 +241,7 @@ void connection::strand_write_callback(uint64_t trans, uint64_t flags, message::
 
 	guard.unlock();
 
-	write_next_buf(buf);
+	write_next_buf(c->copy.raw_buffer());
 }
 
 void connection::write_next_buf(message::raw_buffer_t buf)
@@ -249,13 +259,13 @@ void connection::write_completed(const boost::system::error_code &error, size_t 
 	auto out = m_outgoing.front();
 
 	VLOG(2) << "connection: " << connection_string() <<
-		", trans: " << out->trans <<
+		", message: " << out->copy.to_string() <<
 		", write completed";
 
 	m_outgoing.pop_front();
 
 	if (!error && !m_outgoing.empty()) {
-		message::raw_buffer_t buf = m_outgoing.front()->buf;
+		message::raw_buffer_t buf = m_outgoing.front()->copy.raw_buffer();
 		guard.unlock();
 
 		write_next_buf(buf);
@@ -313,29 +323,36 @@ void connection::read_data(std::shared_ptr<message> msg)
 			});
 }
 
+void connection::process_reply(message &msg)
+{
+	std::unique_lock<std::mutex> guard(m_lock);
+	auto p = m_sent.find(msg.hdr.trans);
+	if (p == m_sent.end()) {
+		LOG(ERROR) << "connection: " << connection_string() <<
+			", reply: " << msg.to_string() <<
+			", error: there is no handler for reply";
+
+		return;
+	}
+
+	auto c = p->second;
+	m_sent.erase(p);
+	auto cb = m_expire.remove(c->expiration_token);
+	guard.unlock();
+
+	VLOG(2) << "connection: " << connection_string() <<
+		", reply: " << msg.to_string() <<
+		", expiration_token: " << c->expiration_token <<
+		", removed callback: " << cb.operator bool() << "/" << cb.target_type().name() <<
+		", removed completion callback";
+	c->complete(shared_from_this(), msg);
+	return;
+}
+
 void connection::process_message(std::shared_ptr<message> msg)
 {
 	if (msg->hdr.flags & SCATTER_FLAGS_REPLY) {
-		uint64_t trans = msg->trans();
-
-		std::unique_lock<std::mutex> guard(m_lock);
-		auto p = m_sent.find(trans);
-		if (p == m_sent.end()) {
-			LOG(ERROR) << "connection: " << connection_string() <<
-				", message: " << msg->to_string() <<
-				", error: there is no handler for reply";
-
-			return;
-		}
-
-		auto c = p->second;
-		m_sent.erase(p);
-		guard.unlock();
-
-		VLOG(2) << "connection: " << connection_string() <<
-			", trans: " << trans <<
-			", removed completion callback";
-		c->complete(shared_from_this(), *msg);
+		process_reply(*msg);
 		return;
 	}
 

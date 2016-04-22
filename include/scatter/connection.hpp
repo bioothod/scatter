@@ -4,6 +4,8 @@
 #include "scatter/message.hpp"
 #include "scatter/pool.hpp"
 
+#include <ribosome/expiration.hpp>
+
 #include <boost/bind.hpp> // must be first among boost headers
 #include <boost/asio.hpp>
 #include <boost/asio/use_future.hpp>
@@ -82,12 +84,15 @@ private:
 
 	address m_announce_address;
 
-	typedef struct {
-		uint64_t		trans;
-		uint64_t		flags;
-		message::raw_buffer_t	buf;
+	ribosome::expiration m_expire;
+
+	struct completion_t {
+		message			copy;
 		process_fn_t		complete;
-	} completion_t;
+		ribosome::expiration::token_t	expiration_token = 0;
+
+		completion_t(const message &msg, process_fn_t c) : copy(msg), complete(c) {}
+	};
 	typedef std::shared_ptr<completion_t> shared_completion_t;
 
 	std::mutex m_lock;
@@ -101,13 +106,14 @@ private:
 	connection(io_service_pool &io, process_fn_t process, error_fn_t error);
 	connection(io_service_pool &io);
 
-	void strand_write_callback(uint64_t id, uint64_t flags, message::raw_buffer_t buf, process_fn_t complete);
+	void strand_write_callback(shared_completion_t);
 	void write_next_buf(message::raw_buffer_t buf);
 	void write_completed(const boost::system::error_code &error, size_t bytes_transferred);
 
 	void read_header();
 	void read_data(std::shared_ptr<message> msg);
 	void process_message(std::shared_ptr<message> msg);
+	void process_reply(message &msg);
 
 	// called from @connect() method to obtain ids of the remote node
 	void request_remote_ids(std::promise<int> &p);

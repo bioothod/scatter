@@ -573,6 +573,74 @@ TEST_F(stest, bcast_one_to_one_bidirectional_different_servers)
 	return;
 }
 
+TEST_F(stest, connection_expiration)
+{
+	node c1, c2;
+	uint64_t db = 123;
+
+	uint64_t c2_bias = 30000;
+
+
+	std::mutex lock;
+	std::condition_variable cv1, cv2;
+
+	std::atomic_ulong c1_counter(0), c1_missed(0);
+	c1.connect(m_addr1, [&] (connection::pointer cn, message &msg) {
+					c1_counter++;
+
+					if (msg.hdr.id % 2 == 0) {
+						VLOG(2) << "connection: " << cn->connection_string() <<
+							", client1 received message: " << msg.to_string() <<
+							", do not send reply";
+
+						msg.hdr.flags = 0;
+						c1_missed++;
+					}
+			});
+	c1.bcast_join(db);
+
+	std::atomic_ulong c2_counter(0), c2_completed(0), c2_failed(0);
+	c2.connect(m_addr1, [&] (connection::pointer cn, message &msg) {
+					VLOG(2) << "connection: " << cn->connection_string() <<
+						", client2 received message: " << msg.to_string();
+
+					c2_counter++;
+			});
+	c2.bcast_join(db);
+
+	uint64_t n = 10;
+	for (uint64_t i = 0; i < n; ++i) {
+		message m2;
+		m2.hdr.id = c2_bias + i;
+		m2.hdr.db = db;
+		m2.hdr.cmd = SCATTER_CMD_CLIENT + 1;
+		m2.hdr.flags = SCATTER_FLAGS_NEED_ACK;
+		m2.encode_header();
+		c2.send(m2, [&] (connection::pointer, message &reply) {
+					c2_completed++;
+
+					if (reply.hdr.status != 0)
+						c2_failed++;
+
+					cv2.notify_one();
+				});
+	}
+
+	std::unique_lock<std::mutex> l2(lock);
+	cv2.wait_for(l2, std::chrono::seconds(20), [&] {return c2_completed == n;});
+	l2.unlock();
+
+	ASSERT_EQ(c2_completed, n);
+	ASSERT_EQ(c2_failed, c1_missed);
+	ASSERT_EQ(c1_counter, n);
+
+	// needed to check the logs whether all intermediate transactions have expired
+	sleep(1);
+
+	return;
+}
+
+
 int main(int argc, char **argv)
 {
 	google::InitGoogleLogging(argv[0]);
