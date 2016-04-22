@@ -7,6 +7,9 @@
 
 #include <msgpack.hpp>
 
+#include <iomanip>
+#include <glog/logging.h>
+
 namespace ioremap { namespace scatter {
 
 struct address {
@@ -34,6 +37,15 @@ struct address {
 		o.pack(family);
 		o.pack_raw(size);
 		o.pack_raw_body(data, size);
+
+		if (VLOG_IS_ON(3)) {
+			std::ostringstream ss;
+			ss << std::hex << std::setfill('0');
+			for (int i = 0; i < size; ++i) {
+				ss << std::setw(2) << static_cast<unsigned>(data[i]);
+			}
+			VLOG(3) << "pack size: " << size << ", data: " << ss.str();
+		}
 	}
 
 	void msgpack_unpack(msgpack::object o);
