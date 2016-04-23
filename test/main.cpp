@@ -29,12 +29,25 @@ protected:
 		m_s2.join(cn);
 	}
 
-	void s2_client_process(connection::pointer cn, message &msg) {
+	void s2_client_process(connection::pointer, message &) {
 	}
 
 	std::string m_addr1, m_addr2;
 	server m_s1, m_s2;
 };
+
+TEST(basic, connect)
+{
+	std::string addr("127.0.0.1:21000:2");
+	server srv1(addr, 1);
+	srv1.test_set_ids({100, 600});
+
+	node c;
+	c.connect(addr, [&] (connection::pointer, message &) {});
+	auto cn = c.get_connection(90);
+	ASSERT_NE(cn.use_count(), 0);
+	ASSERT_EQ(cn->remote_string(), addr);
+}
 
 TEST_F(stest, route)
 {
