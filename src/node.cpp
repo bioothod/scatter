@@ -15,7 +15,13 @@ node::node() : node(1)
 }
 node::~node()
 {
+	for (auto cn: m_route.connections()) {
+		VLOG(2) << "closing connection: " << cn->connection_string();
+		cn->close();
+	}
+
 	m_io_pool.stop();
+	VLOG(2) << "closing node: bye-bye";
 }
 
 connection::pointer node::connect(const std::string &addr_str, typename connection::process_fn_t process)
@@ -26,7 +32,29 @@ connection::pointer node::connect(const std::string &addr_str, typename connecti
 	auto it = m_resolver.resolve(addr_str).get();
 
 	cn->connect(it);
-	m_route.add(cn);
+	auto id = cn->ids()[0];
+
+	VLOG(2) << "connection: " << cn->connection_string() << ", node has been connected";
+	if (m_route.add(cn)) {
+		cn->close();
+
+		auto dump = [] (const std::vector<connection::cid_t> &cids) {
+			std::ostringstream ss;
+
+			for (auto &id: cids) {
+				ss << id;
+				if (id != cids.back())
+					ss << ",";
+			}
+
+			return ss.str();
+		};
+
+		for (auto cn: m_route.connections()) {
+			VLOG(2) << "connection: " << cn->connection_string() << ", routes: " << dump(cn->ids());
+		}
+		return m_route.find(id);
+	}
 
 	std::promise<int> p;
 	std::future<int> f = p.get_future();
@@ -71,7 +99,10 @@ connection::pointer node::connect(const std::string &addr_str, typename connecti
 				std::bind(&node::drop, this, std::placeholders::_1, std::placeholders::_2));
 
 		c->connect(eps_it);
-		m_route.add(c);
+		VLOG(2) << "connection: " << c->connection_string() << ", node has been connected";
+		if (m_route.add(c)) {
+			c->close();
+		}
 	}
 	return cn;
 }
@@ -126,7 +157,9 @@ void node::send(message &msg, connection::process_fn_t complete)
 
 connection::pointer node::get_connection(uint64_t db)
 {
-	return m_route.find(db);
+	auto cn = m_route.find(db);
+	VLOG(2) << "connection: " << cn->connection_string() << ", db: " << db;
+	return cn;
 }
 
 uint64_t node::id() const
