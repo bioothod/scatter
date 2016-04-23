@@ -37,6 +37,7 @@ private:
 	resolver<> m_resolver;
 	connection::proto::acceptor m_acceptor;
 	connection::proto::socket m_socket;
+	bool m_need_exit = false;
 
 	route m_route;
 
@@ -45,6 +46,8 @@ private:
 	std::mutex m_lock;
 	std::map<uint64_t, broadcast> m_bcast;
 	std::vector<connection::cid_t> m_cids;
+
+	std::set<connection::pointer> m_accepted;
 
 	// checks whether connection (usually obtained from route table) is actually artificially added into route table 'self-connection'
 	bool connection_to_self(connection::pointer cn);
