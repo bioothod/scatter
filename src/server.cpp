@@ -22,6 +22,17 @@ server::server(const std::string &addr, int io_pool_size)
 }
 server::~server()
 {
+	m_need_exit = true;
+	m_acceptor.close();
+
+	for (auto cn: m_route.connections()) {
+		cn->close();
+	}
+
+	for (auto cn: m_accepted) {
+		cn->close();
+	}
+
 	m_io_pool.stop();
 }
 
@@ -47,13 +58,19 @@ void server::schedule_accept()
 
 					LOG(INFO) << "server: accepted new client: " << client->connection_string();
 
+					std::unique_lock<std::mutex> l(m_lock);
+					m_accepted.insert(client);
+					l.unlock();
+
 					client->start_reading();
 				} else {
-					LOG(ERROR) << "server: error: " << ec.message();
+					LOG(INFO) << "server: error: " << ec.message();
 				}
 
-				// reschedule acceptor
-				schedule_accept();
+				if (!m_need_exit) {
+					// reschedule acceptor
+					schedule_accept();
+				}
 			});
 }
 
@@ -64,7 +81,11 @@ connection::pointer server::connect(const std::string &addr)
 			std::bind(&server::drop, this, std::placeholders::_1, std::placeholders::_2));
 
 	srv->connect(m_resolver.resolve(addr).get());
-	m_route.add(srv);
+	auto id = srv->ids()[0];
+	if (m_route.add(srv)) {
+		srv->close();
+		srv = m_route.find(id);
+	}
 
 	return srv;
 }
@@ -107,6 +128,10 @@ void server::drop(connection::pointer cn, const boost::system::error_code &ec)
 	(void) ec;
 
 	m_route.remove(cn);
+
+	std::unique_lock<std::mutex> l(m_lock);
+	m_accepted.erase(cn);
+	l.unlock();
 
 	drop_from_broadcast_groups(cn);
 }
@@ -227,11 +252,10 @@ void server::broadcast_client_message(connection::pointer client, message &msg)
 		return;
 	}
 
-	auto sptr = msg.raw_buffer();
 	VLOG(1) << "broadcast_client_message: connection: " << client->connection_string() <<
 		", message: " << msg.to_string();
 
-	it->second.send(client, msg, [this, sptr] (connection::pointer self, message &reply) {
+	it->second.send(client, msg, [] (connection::pointer self, message &reply) {
 				VLOG(1) << "broadcast_client_message: connection: " << self->connection_string() <<
 					", completed with reply: " << reply.to_string();
 
