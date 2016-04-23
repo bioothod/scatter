@@ -6,7 +6,13 @@ namespace ioremap { namespace scatter {
 
 header::header()
 {
-	memset((char *)&this->trans, 0, sizeof(header));
+	trans = 0;
+	id = 0;
+	db = 0;
+	cmd = 0;
+	status = 0;
+	flags = 0;
+	size = 0;
 }
 
 void header::convert()
