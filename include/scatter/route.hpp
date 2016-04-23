@@ -9,8 +9,8 @@ namespace ioremap { namespace scatter {
 
 class route {
 public:
-	void add(connection::pointer);
-	void remove(connection::pointer);
+	int add(connection::pointer);
+	int remove(connection::pointer);
 
 	std::set<connection::pointer> connections();
 

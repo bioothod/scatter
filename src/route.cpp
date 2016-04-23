@@ -4,40 +4,64 @@
 
 namespace ioremap { namespace scatter {
 
-void route::add(connection::pointer cn)
+int route::add(connection::pointer cn)
 {
 	std::vector<connection::cid_t> cids = cn->ids();
 	std::ostringstream ss;
+	int err = -EEXIST;
 
 	std::lock_guard<std::mutex> guard(m_lock);
 	for (auto &id: cids) {
-		m_connections[id] = cn;
+		auto it = m_connections.find(id);
+		if (it != m_connections.end()) {
+			continue;
+		}
+
+		m_connections.insert(std::pair<connection::cid_t, connection::pointer>(id, cn));
+		err = 0;
+
 		ss << id;
 		if (id != cids.back())
 			ss << ",";
 	}
 
-	LOG(INFO) << "connection: " << cn->connection_string() << ", added routes: " << ss.str();
+	LOG(INFO) << "connection: " << cn->connection_string() << ", added routes: " << ss.str() << ", error: " << err;
+	return err;
 }
 
-void route::remove(connection::pointer cn)
+int route::remove(connection::pointer cn)
 {
 	std::vector<connection::cid_t> cids = cn->ids();
 	std::ostringstream ss;
+	int err = -ENOENT;
 
 	std::lock_guard<std::mutex> guard(m_lock);
 	for (auto &id: cids) {
-		m_connections.erase(id);
+		auto it = m_connections.find(id);
+		if (it == m_connections.end()) {
+			continue;
+		}
+
+		if (it->second != cn)
+			continue;
+
+		m_connections.erase(it);
+		err = 0;
+
 		ss << id;
 		if (id != cids.back())
 			ss << ",";
 	}
-	LOG(INFO) << "connection: " << cn->connection_string() << ", removed routes: " << ss.str();
+	LOG(INFO) << "connection: " << cn->connection_string() << ", removed routes: " << ss.str() << ", error: " << err;
+	return err;
 }
 
 connection::pointer route::find(uint64_t id)
 {
 	std::lock_guard<std::mutex> guard(m_lock);
+	if (m_connections.empty())
+		return connection::pointer();
+
 	auto it = m_connections.lower_bound(id);
 
 	// @it points to value >= than @id
