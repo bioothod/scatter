@@ -17,7 +17,6 @@ io_service_pool::~io_service_pool()
 void io_service_pool::stop()
 {
 	m_work.reset();
-	m_io_service.stop();
 
 	for (auto &th: m_pool) {
 		th.join();
