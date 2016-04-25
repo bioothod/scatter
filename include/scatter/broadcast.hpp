@@ -42,6 +42,8 @@ private:
 
 	// these connections are server-server connections
 	std::set<connection::pointer> m_servers;
+
+	void send_completed(connection::shared_completion_t var, connection::pointer fwd, message &reply);
 };
 
 

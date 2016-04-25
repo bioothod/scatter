@@ -63,7 +63,11 @@ void broadcast::leave(connection::pointer client, connection::process_fn_t compl
 
 		for (auto srv: m_servers) {
 			srv->send(0, m_id, SCATTER_FLAGS_NEED_ACK, SCATTER_CMD_BCAST_LEAVE, NULL, 0,
-				[shared, client] (connection::pointer, message &reply) {
+				[shared, client] (connection::pointer srv, message &reply) {
+					LOG(INFO) << "client connection: " << client->connection_string() <<
+						", srv connection: " << srv->connection_string() <<
+						", refcnt: " << shared->refcnt <<
+						", reply: " << reply.to_string();
 					if (--shared->refcnt == 0) {
 						shared->complete(client, reply);
 					}
@@ -71,6 +75,8 @@ void broadcast::leave(connection::pointer client, connection::process_fn_t compl
 		}
 	} else {
 		message msg;
+		msg.hdr.flags = SCATTER_FLAGS_REPLY;
+		msg.hdr.db = m_id;
 		complete(client, msg);
 	}
 }
@@ -91,68 +97,65 @@ void broadcast::send(connection::pointer self, message &msg, connection::process
 	copy.insert(copy.end(), m_servers.begin(), m_servers.end());
 	guard.unlock();
 
-	struct tmp {
-		std::atomic_int			completed;
-		connection::process_fn_t	complete;
-		uint64_t			trans;
-		uint64_t			id;
-		uint64_t			db;
-		int				cmd;
-		std::vector<int>		errors;
-	};
-
-	auto var(std::make_shared<tmp>());
-	var->complete = complete;
-	var->completed = copy.size();
-	var->trans = msg.hdr.trans;
-	var->id = msg.hdr.id;
-	var->db = msg.hdr.db;
-	var->cmd = msg.hdr.cmd;
-
-	auto completion = [&, self, var] (connection::pointer fwd, message &reply) {
-		if (fwd != self)
-			var->errors.push_back(reply.hdr.status);
-
-		if (--var->completed == 0) {
-			VLOG(2) << "connection: " << self->connection_string() <<
-				", broadcast connection: " << fwd->connection_string() <<
-				", reply: " << reply.to_string();
-
-			message tmp;
-			tmp.hdr.cmd = var->cmd;
-			tmp.hdr.id = var->id;
-			tmp.hdr.trans = var->trans;
-			tmp.hdr.db = var->db;
-			tmp.hdr.flags = SCATTER_FLAGS_REPLY;
-			tmp.hdr.status = 0;
-
-			for (auto err: var->errors) {
-				if (!err) {
-					// return success (0 status) if there was at least one successful write
-					tmp.hdr.status = err;
-					break;
-				}
-
-				tmp.hdr.status = err;
-			}
-			var->complete(self, tmp);
-		}
-	};
+	auto cmp = std::make_shared<connection::completion_t>(self, msg, complete);
+	cmp->completed = copy.size();
+	cmp->err = -ENOENT;
 
 	for (auto &c : copy) {
 		VLOG(1) << "connection: " << self->connection_string() <<
 			", broadcast connection: " << c->connection_string() <<
 			": message: " << msg.to_string() <<
-			", completed: " << var->completed << "/" << copy.size();
+			", completed: " << cmp->completed << "/" << copy.size() <<
+			", use_count: " << cmp.use_count();
 
-			if (self && c && c == self) {
-				completion(self, msg);
+			if (c == self) {
+				send_completed(cmp, self, msg);
 				continue;
 			}
 
 			// we basically copy message here, since its header will be modified (transaction number set),
 			/// and this can happen in parallel for different connections
-			c->send(msg.hdr.id, msg.hdr.db, msg.hdr.flags, msg.hdr.cmd, msg.data(), msg.hdr.size, completion);
+			c->send(msg.hdr.id, msg.hdr.db, msg.hdr.flags, msg.hdr.cmd, msg.data(), msg.hdr.size,
+					std::bind(&broadcast::send_completed, this, cmp, std::placeholders::_1, std::placeholders::_2));
+	}
+}
+
+void broadcast::send_completed(connection::shared_completion_t cmp, connection::pointer fwd, message &reply)
+{
+	if (fwd != cmp->self) {
+		if (!reply.hdr.status)
+			cmp->err = 0;
+	}
+
+	if (cmp->completed <= 0) {
+		LOG(ERROR) << __PRETTY_FUNCTION__ << "bug"
+			": completed: " << cmp->completed <<
+			", self: " << cmp->self->connection_string() <<
+			", fwd: " << fwd->connection_string() <<
+			", reply: " << reply.to_string();
+
+		*(char *)0 = 0;
+		throw_error(-EINVAL, "found bug: completed: %d, self: %s, fwd: %s, reply: %s",
+				cmp->completed.load(),
+				cmp->self->connection_string().c_str(),
+				fwd->connection_string().c_str(),
+				reply.to_string().c_str());
+	}
+
+	if (--cmp->completed == 0) {
+		VLOG(2) << "connection: " << cmp->self->connection_string() <<
+			", broadcast connection: " << fwd->connection_string() <<
+			", reply: " << reply.to_string();
+
+		message tmp;
+		tmp.hdr = cmp->copy.hdr;
+		tmp.hdr.flags = SCATTER_FLAGS_REPLY;
+		tmp.hdr.size = 0;
+		tmp.hdr.status = cmp->err;
+		if (reply.hdr.status && !cmp->err)
+			tmp.hdr.status = reply.hdr.status;
+
+		cmp->complete(cmp->self, tmp);
 	}
 }
 
