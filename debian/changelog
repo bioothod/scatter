@@ -1,3 +1,35 @@
+scatter (0.2.0) unstable; urgency=low
+
+  * server: connection must be closed in drop() method, it will stop and clear its expiration thread.
+  * server: fixed broadcast groups announce when new server has connected to server, which currently handles group, which has to move
+  * server: fixed resolver use, since it is sync and return resolver::iterator now
+  * broadcast: use connection::shared_completion_t for broadcast completions, do not use vector in completion, since it can be updated in parallel, which may crash
+  * node: resolver is sync now and returns resolve::iterator
+  * connection: when connection is going down, its expiration module must be closed first,
+  * 	since it can have links (hold shared pointers) to conneciton which will prevent connection from being freed
+  * 	and will eventually timeout and crash, since connection and expiration thread will be freed from expiration thread itself.
+  * connection: cleanup message sending, move shared completion into public visible space,
+  * 	use common constructor for empty/self connection (added empty process/error callbacks)
+  * resolver: get rid of boost::asio::use_future, it can not be compiled with g++ 5.3.1, but it became synchronous
+  * server: close acceptor and all accepted connections before exiting, remove connection from accepted set when it is being closed
+  * test: added very basic connection test
+  * pool: wait until all pending tasks are completed
+  * node: close all connections before exiting, do not request connections if current connection already exists
+  * message: explicitly initialize all header fields
+  * route: return error insert/remove has failed, fail insertion if there exists connection with the same ids
+  * address: fixed family assignment, added verbose logging
+  * connection: added transaction expiration and test
+  * node: randomly initialize node's ID
+  * Added ribosome dependency
+  * test: fixed sign warnings
+  * package: do not depend on gtest, it is downloaded and installed by cmake instructions
+  * cmake: download and install gtest-1.7.0
+  * debian: fixed glog dependency
+  * Create README.md
+  * Updated license to LGPL-3.0
+
+ -- Evgeniy Polyakov <zbr@ioremap.net>  Mon, 25 Apr 2016 14:24:13 +0400
+
 scatter (0.1.1) unstable; urgency=low
 
   * Added all connect/join logic
