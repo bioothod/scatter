@@ -45,7 +45,7 @@ int main(int argc, char *argv[])
 	scatter::io_service_pool io(3);
 	scatter::resolver<> res(io);
 
-	std::vector<std::future<boost::asio::ip::tcp::resolver::iterator>> afs;
+	std::vector<boost::asio::ip::tcp::resolver::iterator> afs;
 	for (const auto &addr : remotes) {
 		afs.emplace_back(std::move(res.resolve(addr)));
 	}
@@ -53,7 +53,7 @@ int main(int argc, char *argv[])
 	int pos = 0;
 	for (auto &f: afs) {
 		try {
-			auto endpoint = f.get()->endpoint();
+			auto endpoint = f->endpoint();
 			auto addr = endpoint.address();
 			auto port = endpoint.port();
 			std::cout << remotes[pos] << " : " << addr.to_string() << ":" << port << std::endl;
