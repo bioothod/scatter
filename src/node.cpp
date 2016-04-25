@@ -29,7 +29,7 @@ connection::pointer node::connect(const std::string &addr_str, typename connecti
 	connection::pointer cn = connection::create(m_io_pool, process,
 			std::bind(&node::drop, this, std::placeholders::_1, std::placeholders::_2));
 
-	auto it = m_resolver.resolve(addr_str).get();
+	auto it = m_resolver.resolve(addr_str);
 
 	cn->connect(it);
 	auto id = cn->ids()[0];
