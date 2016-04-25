@@ -7,7 +7,7 @@ namespace ioremap { namespace scatter {
 server::server(const std::string &addr, int io_pool_size)
 	: m_io_pool(io_pool_size)
 	, m_resolver(m_io_pool)
-	, m_acceptor(m_io_pool.get_service(), m_resolver.resolve(addr).get()->endpoint(), true)
+	, m_acceptor(m_io_pool.get_service(), m_resolver.resolve(addr)->endpoint(), true)
 	, m_socket(m_io_pool.get_service()),
 	m_announce_address(m_acceptor.local_endpoint())
 {
@@ -80,7 +80,7 @@ connection::pointer server::connect(const std::string &addr)
 			std::bind(&server::message_handler, this, std::placeholders::_1, std::placeholders::_2),
 			std::bind(&server::drop, this, std::placeholders::_1, std::placeholders::_2));
 
-	srv->connect(m_resolver.resolve(addr).get());
+	srv->connect(m_resolver.resolve(addr));
 	auto id = srv->ids()[0];
 	if (m_route.add(srv)) {
 		srv->close();
@@ -119,7 +119,7 @@ void server::drop_from_broadcast_groups(connection::pointer client)
 	}
 
 	for (auto group: groups) {
-		drop_from_broadcast_group_nolock(group, client, [] (connection::pointer, message &) {});
+		drop_from_broadcast_group_nolock(group, client, [this] (connection::pointer cn, message &reply) {});
 	}
 }
 
@@ -132,6 +132,8 @@ void server::drop(connection::pointer cn, const boost::system::error_code &ec)
 	std::unique_lock<std::mutex> l(m_lock);
 	m_accepted.erase(cn);
 	l.unlock();
+
+	cn->close();
 
 	drop_from_broadcast_groups(cn);
 }
@@ -213,7 +215,7 @@ void server::announce_broadcast_groups(connection::pointer client, message &msg)
 
 	auto cm = std::make_shared<completion>();
 	cm->cn = client;
-	cm->refcnt = m_bcast.size() + 1;
+	cm->refcnt = 1;
 	cm->id = msg.hdr.id;
 	cm->db = msg.hdr.db;
 	cm->trans = msg.hdr.trans;
@@ -236,7 +238,21 @@ void server::announce_broadcast_groups(connection::pointer client, message &msg)
 		uint64_t group = bg.first;
 
 		// we should send all broadcast groups into @client
-		announce_broadcast_group_nolock(group, connection::pointer(), completion);
+
+		auto cn = m_route.find(group);
+		if (cn && cn == client) {
+			cm->refcnt++;
+
+			LOG(INFO) << "connection: " << cn->connection_string() << ", announcing broadcast group: " << group;
+
+			// when remote node gets new message into broadcast group @group from some other client, it will
+			// be sent to this server and will be broadcasted further to clients
+			cn->send(m_cids[0], group, SCATTER_FLAGS_NEED_ACK, SCATTER_CMD_BCAST_JOIN, NULL, 0, completion);
+
+			// when this node gets new message into broadcast group @group,
+			// it should also broadcast it to remote server
+			bg.second.join(cn, true);
+		}
 	}
 
 	completion(client, msg);
