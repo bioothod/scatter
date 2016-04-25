@@ -4,7 +4,7 @@
 
 namespace ioremap { namespace scatter {
 
-connection::connection(io_service_pool &io, connection::process_fn_t process, error_fn_t error, typename connection::proto::socket &&socket)
+connection::connection(io_service_pool &io, process_fn_t process, error_fn_t error, proto::socket &&socket)
 	: m_pool(io),
 	  m_strand(io.get_service()),
 	  m_process(process),
@@ -14,7 +14,7 @@ connection::connection(io_service_pool &io, connection::process_fn_t process, er
 {
 	set_connection_strings();
 }
-connection::connection(io_service_pool &io, connection::process_fn_t process, error_fn_t error)
+connection::connection(io_service_pool &io, process_fn_t process, error_fn_t error)
 	: m_pool(io),
 	  m_strand(io.get_service()),
 	  m_process(process),
@@ -24,17 +24,17 @@ connection::connection(io_service_pool &io, connection::process_fn_t process, er
 {
 }
 connection::connection(io_service_pool &io)
-	: m_pool(io),
-	  m_strand(io.get_service()),
-	  m_socket(io.get_service()),
-	  m_transactions(0)
+	: connection(io, std::bind(&connection::empty_process, this, std::placeholders::_1, std::placeholders::_2),
+			std::bind(&connection::empty_error, this, std::placeholders::_1, std::placeholders::_2))
 {
 }
 
 
 connection::~connection()
 {
-	VLOG(2) << "connection: " << connection_string() << ": going down";
+	m_expire.stop();
+
+	LOG(INFO) << "connection: " << connection_string() << ": going down";
 }
 
 
@@ -58,6 +58,16 @@ std::string connection::local_string() const
 
 void connection::close()
 {
+	// we have to stop expiration thread since it holds callbacks which potentially hold a reference
+	// to this connection, thus preventing it from being freed
+	//
+	// every user of this connection will soon release its reference, and only expiration thread will stuck
+	// eventually (when all callbacks have expired) calling destruction of itself from itself
+	//
+	// if we stop expiration thread here (and clearing its callback list), there will be no users
+	// except those who directly hold connection reference, which will be dropped as soon as IO thread
+	// reports error and appropriate @error_fn_t is called
+	m_expire.stop();
 	m_pool.queue_task([this]() { m_socket.close(); });
 }
 
@@ -90,6 +100,7 @@ void connection::connect(const connection::resolver_iterator it)
 				}
 
 				set_connection_strings();
+				LOG(INFO) << "connected: " << connection_string();
 
 				read_header();
 				request_remote_ids(p);
@@ -101,11 +112,8 @@ void connection::request_remote_ids(std::promise<int> &p)
 {
 	auto self(shared_from_this());
 
-	std::shared_ptr<message> msg = std::make_shared<message>();
-	msg->hdr.flags = SCATTER_FLAGS_NEED_ACK;
-	msg->hdr.cmd = SCATTER_CMD_REMOTE_IDS;
-
-	send(*msg, [this, self, msg, &p] (pointer, message &reply) {
+	send(0, 0, SCATTER_FLAGS_NEED_ACK, SCATTER_CMD_REMOTE_IDS, NULL, 0,
+			[this, self, &p] (pointer, message &reply) {
 				if (reply.hdr.status) {
 					LOG(ERROR) << "connection: " << connection_string() << ", reply: " << reply.to_string() <<
 						", could not request remote ids: " << reply.hdr.status;
@@ -144,9 +152,9 @@ void connection::send(message &msg, connection::process_fn_t complete)
 
 	VLOG(2) << "connection: " << connection_string() << ", sending data: " << msg.to_string();
 
-	std::shared_ptr<connection::completion_t> c = std::make_shared<connection::completion_t>(msg, complete);
-
 	// msg is copied, but it is not very expensive, since data is a shared pointer
+	std::shared_ptr<connection::completion_t> c = std::make_shared<connection::completion_t>(shared_from_this(), msg, complete);
+
 	m_strand.post(std::bind(&connection::strand_write_callback, this, c));
 }
 
@@ -168,18 +176,15 @@ void connection::send(uint64_t id, uint64_t db, uint64_t flags, int cmd, const c
 
 void connection::send_reply(const message &msg)
 {
-	auto self(shared_from_this());
+	message reply;
+	reply.hdr = msg.hdr;
+	reply.hdr.size = 0;
+	reply.hdr.flags = 0;
+	reply.hdr.flags = SCATTER_FLAGS_REPLY;
 
-	std::shared_ptr<message> reply = std::make_shared<message>();
-	reply->hdr = msg.hdr;
-	reply->hdr.size = 0;
-	reply->hdr.flags &= ~SCATTER_FLAGS_NEED_ACK;
-	reply->hdr.flags |= SCATTER_FLAGS_REPLY;
+	VLOG(2) << "connection: " << connection_string() << ", sending reply back: " << reply.to_string();
 
-	VLOG(2) << "connection: " << connection_string() << ", sending reply back: " << reply->to_string();
-
-	send(*reply, [this, self, reply] (pointer, message &) {
-			});
+	send(reply, [] (pointer, message &) {});
 }
 
 void connection::send_blocked_command(uint64_t id, uint64_t db, int cmd, const char *data, size_t size)
@@ -188,7 +193,7 @@ void connection::send_blocked_command(uint64_t id, uint64_t db, int cmd, const c
 	std::future<int> f = p.get_future();
 
 	send(id, db, SCATTER_FLAGS_NEED_ACK, cmd, data, size,
-		[&] (pointer self, message &msg) {
+		[&p] (pointer self, message &msg) {
 			if (msg.hdr.status) {
 				LOG(ERROR) << "connection: " << self->connection_string() <<
 					", message: " << msg.to_string() <<
@@ -200,12 +205,11 @@ void connection::send_blocked_command(uint64_t id, uint64_t db, int cmd, const c
 				return;
 			}
 
-			p.set_value(db);
+			p.set_value(msg.hdr.db);
 		});
 
 	f.get();
 }
-
 
 void connection::strand_write_callback(shared_completion_t c)
 {
@@ -217,9 +221,8 @@ void connection::strand_write_callback(shared_completion_t c)
 		m_sent[c->copy.hdr.trans] = c;
 
 		auto time = std::chrono::system_clock::now() + std::chrono::seconds(10);
-		auto self(shared_from_this());
-		c->expiration_token = m_expire.insert(time, [self, c] () {
-					VLOG(2) << "connection: " << self->connection_string() <<
+		c->expiration_token = m_expire.insert(time, [c] () {
+					VLOG(1) << "connection: " << c->self->connection_string() <<
 						", message: " << c->copy.to_string() <<
 						", expired";
 
@@ -227,10 +230,10 @@ void connection::strand_write_callback(shared_completion_t c)
 					c->copy.hdr.size = 0;
 					c->copy.hdr.flags = SCATTER_FLAGS_REPLY;
 
-					self->process_reply(c->copy);
+					c->self->process_reply(c->copy);
 				});
 
-		VLOG(2) << "connection: " << connection_string() <<
+		VLOG(2) << "connection: " << c->self->connection_string() <<
 			", message: " << c->copy.to_string() <<
 			", expiration_token: " << c->expiration_token <<
 			", added completion callback";
@@ -282,7 +285,7 @@ void connection::read_header()
 				if (ec) {
 					LOG(INFO) << "connection: " << connection_string() << ", error: " << ec.message();
 					// reset connection, drop it from database
-					m_error(shared_from_this(), ec);
+					m_error(self, ec);
 					return;
 				}
 
@@ -308,7 +311,7 @@ void connection::read_data(std::shared_ptr<message> msg)
 					LOG(INFO) << "connection: " << connection_string() << ", error: " << ec.message();
 
 					// reset connection, drop it from database
-					m_error(shared_from_this(), ec);
+					m_error(self, ec);
 					return;
 				}
 				
@@ -335,7 +338,7 @@ void connection::process_reply(message &msg)
 		return;
 	}
 
-	auto c = p->second;
+	shared_completion_t c = p->second;
 	m_sent.erase(p);
 	auto cb = m_expire.remove(c->expiration_token);
 	guard.unlock();

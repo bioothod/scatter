@@ -29,6 +29,25 @@ public:
 
 	typedef uint64_t cid_t;
 
+	struct completion_t {
+		connection::pointer	self;
+		message			copy;
+		process_fn_t		complete;
+
+		ribosome::expiration::token_t	expiration_token = 0;
+		std::atomic_int			completed;
+		int				err = 0;
+
+		completion_t(connection::pointer cn, const message &msg, process_fn_t c)
+			: self(cn)
+			, copy(msg)
+			, complete(c)
+			, completed(0)
+		{
+		}
+	};
+	typedef std::shared_ptr<completion_t> shared_completion_t;
+
 	static pointer create(io_service_pool& io_pool, process_fn_t process, error_fn_t error, typename proto::socket &&socket) {
 		return pointer(new connection(io_pool, process, error, std::move(socket)));
 	}
@@ -86,15 +105,6 @@ private:
 
 	ribosome::expiration m_expire;
 
-	struct completion_t {
-		message			copy;
-		process_fn_t		complete;
-		ribosome::expiration::token_t	expiration_token = 0;
-
-		completion_t(const message &msg, process_fn_t c) : copy(msg), complete(c) {}
-	};
-	typedef std::shared_ptr<completion_t> shared_completion_t;
-
 	std::mutex m_lock;
 	std::unordered_map<uint64_t, shared_completion_t> m_sent;
 	std::deque<shared_completion_t> m_outgoing;
@@ -120,6 +130,9 @@ private:
 	void parse_remote_ids(std::promise<int> &p, message &msg);
 
 	void set_connection_strings();
+
+	void empty_process(pointer, message &) {}
+	void empty_error(pointer, const boost::system::error_code &) {}
 };
 
 }} // namespace ioremap::scatter
